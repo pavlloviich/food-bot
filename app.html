@@ -647,6 +647,121 @@
   </div>
 </div>
 
+
+<!-- Profile modal -->
+<div class="modal-overlay" id="profileModal">
+  <div class="modal">
+    <div class="modal-title">Профиль</div>
+
+    <div class="profile-row">
+      <div class="profile-row-label">Telegram ID</div>
+      <div class="profile-row-value" id="profileUserId">—</div>
+    </div>
+
+    <div class="profile-row">
+      <div class="profile-row-label">Пол</div>
+      <div class="profile-row-value" id="profileGender">—</div>
+    </div>
+
+    <div class="profile-row">
+      <div class="profile-row-label">Возраст</div>
+      <div class="profile-row-value" id="profileAge">—</div>
+    </div>
+
+    <div class="profile-row">
+      <div class="profile-row-label">Вес</div>
+      <div class="profile-row-value" id="profileWeight">—</div>
+    </div>
+
+    <div class="profile-row">
+      <div class="profile-row-label">Рост</div>
+      <div class="profile-row-value" id="profileHeight">—</div>
+    </div>
+
+    <div class="profile-row">
+      <div class="profile-row-label">Активность</div>
+      <div class="profile-row-value" id="profileActivity">—</div>
+    </div>
+
+    <div class="profile-row">
+      <div class="profile-row-label">Цель</div>
+      <div class="profile-row-value" id="profileGoal">—</div>
+    </div>
+
+    <div class="profile-row">
+      <div class="profile-row-label">Калории</div>
+      <div class="profile-row-value" id="profileCaloriesGoal">—</div>
+    </div>
+
+    <div class="profile-row">
+      <div class="profile-row-label">Дефицит</div>
+      <div class="profile-row-value" id="profileCaloriesDeficit">—</div>
+    </div>
+
+    <div class="profile-row">
+      <div class="profile-row-label">Поддержание</div>
+      <div class="profile-row-value" id="profileCaloriesMaintenance">—</div>
+    </div>
+
+    <div class="profile-row">
+      <div class="profile-row-label">Вода</div>
+      <div class="profile-row-value" id="profileWaterGoal">—</div>
+    </div>
+
+    <button class="submit-btn" id="profileCloseBtn">Закрыть</button>
+  </div>
+</div>
+
+<!-- Reminders modal -->
+<div class="modal-overlay" id="remindersModal">
+  <div class="modal">
+    <div class="modal-title">Напоминания</div>
+
+    <div class="profile-row">
+      <div class="profile-row-label">Завтрак</div>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <input type="time" class="form-input" id="remBreakfastTime" style="width:120px;padding:10px 12px;">
+        <input type="checkbox" id="remBreakfastOn">
+      </div>
+    </div>
+
+    <div class="profile-row">
+      <div class="profile-row-label">Обед</div>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <input type="time" class="form-input" id="remLunchTime" style="width:120px;padding:10px 12px;">
+        <input type="checkbox" id="remLunchOn">
+      </div>
+    </div>
+
+    <div class="profile-row">
+      <div class="profile-row-label">Ужин</div>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <input type="time" class="form-input" id="remDinnerTime" style="width:120px;padding:10px 12px;">
+        <input type="checkbox" id="remDinnerOn">
+      </div>
+    </div>
+
+    <div class="profile-row">
+      <div class="profile-row-label">Вода</div>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <input type="checkbox" id="remWaterOn">
+      </div>
+    </div>
+
+    <div id="remWaterIntervalRow" style="display:none;margin-top:14px;">
+      <label class="form-label">Интервал напоминаний о воде</label>
+      <div class="goal-btns">
+        <button type="button" class="goal-btn" data-interval="1" onclick="setWaterInterval(1)">1 час</button>
+        <button type="button" class="goal-btn" data-interval="2" onclick="setWaterInterval(2)">2 часа</button>
+        <button type="button" class="goal-btn" data-interval="3" onclick="setWaterInterval(3)">3 часа</button>
+      </div>
+    </div>
+
+    <button class="submit-btn" id="remindersSaveBtn">Сохранить</button>
+  </div>
+</div>
+
+
 <script>
 const SUPABASE_URL = 'https://ecomaxacsgdreayvyfnz.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_Avhoql7DMWlCV8JMjnhKjA_yjKecgKI';
@@ -979,59 +1094,136 @@ async function init() {
 
 init();
 
-// ── Reminders UI ──────────────────────────────────────────────────────────────
+// ── Reminders UI / Profile UI ─────────────────────────────────────────────
 
 let selectedWaterInterval = 2;
 
 function setWaterInterval(n) {
   selectedWaterInterval = n;
   document.querySelectorAll('[data-interval]').forEach(b => {
-    b.classList.toggle('active', parseInt(b.dataset.interval) === n);
+    b.classList.toggle('active', parseInt(b.dataset.interval, 10) === n);
   });
 }
 
+function openProfile() {
+  if (!userSettings) {
+    alert('Профиль ещё загружается');
+    return;
+  }
+
+  document.getElementById('profileUserId').textContent = userId || '—';
+  document.getElementById('profileGender').textContent = userSettings.gender || '—';
+  document.getElementById('profileAge').textContent = userSettings.age || '—';
+  document.getElementById('profileWeight').textContent = userSettings.weight_kg ? `${userSettings.weight_kg} кг` : '—';
+  document.getElementById('profileHeight').textContent = userSettings.height_cm ? `${userSettings.height_cm} см` : '—';
+  document.getElementById('profileActivity').textContent = userSettings.activity || '—';
+  document.getElementById('profileGoal').textContent = userSettings.goal || '—';
+  document.getElementById('profileCaloriesGoal').textContent = userSettings.calories_goal ? `${userSettings.calories_goal} ккал` : '—';
+  document.getElementById('profileCaloriesDeficit').textContent = userSettings.calories_deficit ? `${userSettings.calories_deficit} ккал` : '—';
+  document.getElementById('profileCaloriesMaintenance').textContent = userSettings.calories_maintenance ? `${userSettings.calories_maintenance} ккал` : '—';
+  document.getElementById('profileWaterGoal').textContent = userSettings.water_goal_ml ? `${userSettings.water_goal_ml} мл` : '—';
+
+  document.getElementById('profileModal').classList.add('open');
+}
+
 async function openReminders() {
-  if (!userSettings) { alert('Загрузка...'); return; }
-  document.getElementById('remBreakfastOn').checked   = !!userSettings.remind_breakfast_enabled;
-  document.getElementById('remBreakfastTime').value   = userSettings.remind_breakfast_time || '09:00';
-  document.getElementById('remLunchOn').checked       = !!userSettings.remind_lunch_enabled;
-  document.getElementById('remLunchTime').value       = userSettings.remind_lunch_time || '13:00';
-  document.getElementById('remDinnerOn').checked      = !!userSettings.remind_dinner_enabled;
-  document.getElementById('remDinnerTime').value      = userSettings.remind_dinner_time || '19:00';
-  document.getElementById('remWaterOn').checked       = !!userSettings.remind_water_enabled;
+  if (!userSettings) {
+    alert('Настройки ещё загружаются');
+    return;
+  }
+
+  document.getElementById('remBreakfastOn').checked = !!userSettings.remind_breakfast_enabled;
+  document.getElementById('remBreakfastTime').value = userSettings.remind_breakfast_time || '09:00';
+  document.getElementById('remLunchOn').checked = !!userSettings.remind_lunch_enabled;
+  document.getElementById('remLunchTime').value = userSettings.remind_lunch_time || '13:00';
+  document.getElementById('remDinnerOn').checked = !!userSettings.remind_dinner_enabled;
+  document.getElementById('remDinnerTime').value = userSettings.remind_dinner_time || '19:00';
+  document.getElementById('remWaterOn').checked = !!userSettings.remind_water_enabled;
   selectedWaterInterval = userSettings.remind_water_interval || 2;
   document.getElementById('remWaterIntervalRow').style.display = userSettings.remind_water_enabled ? 'block' : 'none';
   setWaterInterval(selectedWaterInterval);
   document.getElementById('remindersModal').classList.add('open');
 }
 
-document.getElementById('profileBtn').addEventListener('click', openProfile);
-document.getElementById('remindersBtn').addEventListener('click', openReminders);
-document.getElementById('profileModal').addEventListener('click', e => {
-  if (e.target === e.currentTarget) document.getElementById('profileModal').classList.remove('open');
-});
-document.getElementById('remindersModal').addEventListener('click', e => {
-  if (e.target === e.currentTarget) document.getElementById('remindersModal').classList.remove('open');
-});
-document.getElementById('remWaterOn').addEventListener('change', function() {
-  document.getElementById('remWaterIntervalRow').style.display = this.checked ? 'block' : 'none';
-});
-document.getElementById('remindersSaveBtn').addEventListener('click', async () => {
-  if (!userId) return;
-  const updates = {
-    remind_breakfast_enabled: document.getElementById('remBreakfastOn').checked ? 1 : 0,
-    remind_breakfast_time:    document.getElementById('remBreakfastTime').value,
-    remind_lunch_enabled:     document.getElementById('remLunchOn').checked ? 1 : 0,
-    remind_lunch_time:        document.getElementById('remLunchTime').value,
-    remind_dinner_enabled:    document.getElementById('remDinnerOn').checked ? 1 : 0,
-    remind_dinner_time:       document.getElementById('remDinnerTime').value,
-    remind_water_enabled:     document.getElementById('remWaterOn').checked ? 1 : 0,
-    remind_water_interval:    selectedWaterInterval,
-  };
-  await sb.from('user_settings').update(updates).eq('user_id', userId);
-  Object.assign(userSettings, updates);
-  document.getElementById('remindersModal').classList.remove('open');
-});
+function bindProfileAndReminderHandlers() {
+  const profileBtn = document.getElementById('profileBtn');
+  if (profileBtn) profileBtn.addEventListener('click', openProfile);
+
+  const remindersBtn = document.getElementById('remindersBtn');
+  if (remindersBtn) remindersBtn.addEventListener('click', openReminders);
+
+  const profileModal = document.getElementById('profileModal');
+  if (profileModal) {
+    profileModal.addEventListener('click', e => {
+      if (e.target === e.currentTarget) profileModal.classList.remove('open');
+    });
+  }
+
+  const remindersModal = document.getElementById('remindersModal');
+  if (remindersModal) {
+    remindersModal.addEventListener('click', e => {
+      if (e.target === e.currentTarget) remindersModal.classList.remove('open');
+    });
+  }
+
+  const profileCloseBtn = document.getElementById('profileCloseBtn');
+  if (profileCloseBtn) {
+    profileCloseBtn.addEventListener('click', () => {
+      document.getElementById('profileModal').classList.remove('open');
+    });
+  }
+
+  const remWaterOn = document.getElementById('remWaterOn');
+  if (remWaterOn) {
+    remWaterOn.addEventListener('change', function() {
+      document.getElementById('remWaterIntervalRow').style.display = this.checked ? 'block' : 'none';
+    });
+  }
+
+  const remindersSaveBtn = document.getElementById('remindersSaveBtn');
+  if (remindersSaveBtn) {
+    remindersSaveBtn.addEventListener('click', async () => {
+      if (!userId) {
+        alert('Не удалось определить пользователя Telegram');
+        return;
+      }
+
+      const updates = {
+        remind_breakfast_enabled: document.getElementById('remBreakfastOn').checked ? 1 : 0,
+        remind_breakfast_time: document.getElementById('remBreakfastTime').value,
+        remind_lunch_enabled: document.getElementById('remLunchOn').checked ? 1 : 0,
+        remind_lunch_time: document.getElementById('remLunchTime').value,
+        remind_dinner_enabled: document.getElementById('remDinnerOn').checked ? 1 : 0,
+        remind_dinner_time: document.getElementById('remDinnerTime').value,
+        remind_water_enabled: document.getElementById('remWaterOn').checked ? 1 : 0,
+        remind_water_interval: selectedWaterInterval,
+      };
+
+      const btn = document.getElementById('remindersSaveBtn');
+      btn.textContent = 'Сохраняю...';
+      btn.disabled = true;
+
+      try {
+        const { error } = await sb.from('user_settings').update(updates).eq('user_id', userId);
+        if (error) {
+          console.error('save reminders error:', error);
+          alert('Не удалось сохранить напоминания');
+          return;
+        }
+
+        if (!userSettings) userSettings = {};
+        Object.assign(userSettings, updates);
+        document.getElementById('remindersModal').classList.remove('open');
+      } finally {
+        btn.textContent = 'Сохранить';
+        btn.disabled = false;
+      }
+    });
+  }
+}
+
+bindProfileAndReminderHandlers();
+
 
 </script>
 
