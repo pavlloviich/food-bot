@@ -578,7 +578,7 @@ async def setup_hour(call: CallbackQuery, state: FSMContext):
         f"🎉 *Всё готово!*\n\n"
         f"🔔 Сводка каждый день в *{hour}:00* (UTC{'+' if tz>=0 else ''}{tz})\n\n"
         f"Отправляй фото еды, голосовые или текст!\n"
-        f"💧 'выпил стакан воды' — вода\n"
+        f"💧 'выпил стакан воды' — вода",
         parse_mode="Markdown"
     )
 
