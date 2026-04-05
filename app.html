@@ -1007,18 +1007,15 @@ async function openReminders() {
 
 document.getElementById('profileBtn').addEventListener('click', openProfile);
 document.getElementById('remindersBtn').addEventListener('click', openReminders);
-
 document.getElementById('profileModal').addEventListener('click', e => {
   if (e.target === e.currentTarget) document.getElementById('profileModal').classList.remove('open');
 });
 document.getElementById('remindersModal').addEventListener('click', e => {
   if (e.target === e.currentTarget) document.getElementById('remindersModal').classList.remove('open');
 });
-
 document.getElementById('remWaterOn').addEventListener('change', function() {
   document.getElementById('remWaterIntervalRow').style.display = this.checked ? 'block' : 'none';
 });
-
 document.getElementById('remindersSaveBtn').addEventListener('click', async () => {
   if (!userId) return;
   const updates = {
@@ -1035,7 +1032,6 @@ document.getElementById('remindersSaveBtn').addEventListener('click', async () =
   Object.assign(userSettings, updates);
   document.getElementById('remindersModal').classList.remove('open');
 });
-
 
 </script>
 
