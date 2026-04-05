@@ -1,37 +1,29 @@
 """
 Телеграм-бот для подсчёта калорий
-Использует Google Gemini (бесплатно)
 Поддерживает: фото еды, голосовые сообщения, текст
+Хранит дневник в SQLite, выдаёт сводку по запросу
 """
 
 import asyncio
 import os
 import sqlite3
 import tempfile
-import json
-import base64
-import aiohttp
 from datetime import date, datetime
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import Message
-
-import google.generativeai as genai
-
-# ── Конфиг ────────────────────────────────────────────────────────────────────
+from openai import AsyncOpenAI
+import aiohttp
+import base64
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "ВАШ_ТОКЕН_СЮДА")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "ВАШ_КЛЮЧ_СЮДА")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "ВАШ_КЛЮЧ_СЮДА")
 DB_PATH = "calories.db"
-
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-2.0-flash")
 
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
-
-# ── База данных ────────────────────────────────────────────────────────────────
+client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -75,39 +67,58 @@ def get_today(user_id):
     return [{"time": r[0], "food": r[1], "calories": r[2],
              "protein": r[3], "fat": r[4], "carbs": r[5]} for r in rows]
 
-# ── Gemini-утилиты ─────────────────────────────────────────────────────────────
-
-PROMPT = """Ты диетолог-аналитик. Определи калории и БЖУ.
-Ответь ТОЛЬКО в формате JSON без лишнего текста, без markdown:
-{"food":"название","weight_g":100,"calories":200,"protein":10,"fat":5,"carbs":20,"comment":""}"""
-
-def parse_gemini(text):
-    text = text.strip()
-    if "```" in text:
-        text = text.split("```")[1]
-        if text.startswith("json"):
-            text = text[4:]
-    return json.loads(text.strip())
+SYSTEM_PROMPT = """Ты диетолог-аналитик. Пользователь присылает описание или фото еды/напитка.
+Твой ответ ВСЕГДА строго в формате JSON без лишнего текста:
+{
+  "food": "название блюда/продукта",
+  "weight_g": примерный вес в граммах (число),
+  "calories": калории (число),
+  "protein": белки в граммах (число),
+  "fat": жиры в граммах (число),
+  "carbs": углеводы в граммах (число),
+  "comment": "короткий комментарий (необязательно)"
+}
+Если невозможно определить — делай разумную оценку среднего размера порции."""
 
 async def analyze_text(text):
-    resp = model.generate_content(f"{PROMPT}\n\nЕда: {text}")
-    return parse_gemini(resp.text)
+    import json
+    resp = await client.chat.completions.create(
+        model="gpt-4o",
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": text}
+        ]
+    )
+    return json.loads(resp.choices[0].message.content)
 
 async def analyze_image(image_bytes):
-    img = {"mime_type": "image/jpeg", "data": base64.b64encode(image_bytes).decode()}
-    resp = model.generate_content([PROMPT + "\n\nОпредели что на фото и посчитай калории.", img])
-    return parse_gemini(resp.text)
+    import json
+    b64 = base64.b64encode(image_bytes).decode()
+    resp = await client.chat.completions.create(
+        model="gpt-4o",
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": [
+                {"type": "image_url",
+                 "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                {"type": "text", "text": "Что это за еда? Определи калории."}
+            ]}
+        ]
+    )
+    return json.loads(resp.choices[0].message.content)
 
 async def transcribe_voice(ogg_bytes):
-    """Конвертируем через Gemini Audio"""
-    audio = {"mime_type": "audio/ogg", "data": base64.b64encode(ogg_bytes).decode()}
-    resp = model.generate_content([
-        "Транскрибируй это голосовое сообщение на русском языке. Верни только текст без пояснений.",
-        audio
-    ])
-    return resp.text.strip()
-
-# ── Форматирование ─────────────────────────────────────────────────────────────
+    with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as f:
+        f.write(ogg_bytes)
+        tmp_path = f.name
+    with open(tmp_path, "rb") as f:
+        transcript = await client.audio.transcriptions.create(
+            model="whisper-1", file=f, language="ru"
+        )
+    os.unlink(tmp_path)
+    return transcript.text
 
 def format_result(data):
     lines = [
@@ -125,12 +136,10 @@ def format_result(data):
 def format_summary(meals):
     if not meals:
         return "📭 Сегодня записей нет. Отправь фото или опиши что ел!"
-
     total_cal = sum(m["calories"] for m in meals)
     total_p   = sum(m["protein"] or 0 for m in meals)
     total_f   = sum(m["fat"]     or 0 for m in meals)
     total_c   = sum(m["carbs"]   or 0 for m in meals)
-
     rows = ["📅 *Дневник за сегодня*\n"]
     rows.append("```")
     rows.append(f"{'Время':<6} {'Блюдо':<22} {'Ккал':>5}")
@@ -147,8 +156,6 @@ def format_summary(meals):
         f"🍞 Углеводы: *{total_c:.0f}г*"
     )
     return "\n".join(rows)
-
-# ── Хэндлеры ──────────────────────────────────────────────────────────────────
 
 @dp.message(Command("start"))
 async def cmd_start(msg: Message):
@@ -189,11 +196,9 @@ async def handle_photo(msg: Message):
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as r:
                 image_bytes = await r.read()
-
         data = await analyze_image(image_bytes)
         save_meal(msg.from_user.id, data["food"], data["calories"],
                   data.get("protein", 0), data.get("fat", 0), data.get("carbs", 0))
-
         today_total = sum(m["calories"] for m in get_today(msg.from_user.id))
         text = format_result(data) + f"\n\n📊 Всего сегодня: *{today_total} ккал*"
         await wait.edit_text(text, parse_mode="Markdown")
@@ -209,15 +214,12 @@ async def handle_voice(msg: Message):
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as r:
                 ogg_bytes = await r.read()
-
         text = await transcribe_voice(ogg_bytes)
         await wait.edit_text(f"📝 Распознано: _{text}_\n\n🔍 Считаю калории...",
                               parse_mode="Markdown")
-
         data = await analyze_text(text)
         save_meal(msg.from_user.id, data["food"], data["calories"],
                   data.get("protein", 0), data.get("fat", 0), data.get("carbs", 0))
-
         today_total = sum(m["calories"] for m in get_today(msg.from_user.id))
         result = format_result(data) + f"\n\n📊 Всего сегодня: *{today_total} ккал*"
         await wait.edit_text(result, parse_mode="Markdown")
@@ -231,20 +233,16 @@ async def handle_text(msg: Message):
         data = await analyze_text(msg.text)
         save_meal(msg.from_user.id, data["food"], data["calories"],
                   data.get("protein", 0), data.get("fat", 0), data.get("carbs", 0))
-
         today_total = sum(m["calories"] for m in get_today(msg.from_user.id))
         text = format_result(data) + f"\n\n📊 Всего сегодня: *{today_total} ккал*"
         await wait.edit_text(text, parse_mode="Markdown")
     except Exception as e:
         await wait.edit_text(f"❌ Ошибка: {e}")
 
-# ── Запуск ─────────────────────────────────────────────────────────────────────
-
 async def main():
     init_db()
-    print("Бот запущен (Gemini)...")
+    print("Бот запущен...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
-
