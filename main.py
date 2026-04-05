@@ -1,38 +1,35 @@
 """
 Телеграм-бот для подсчёта калорий
+Использует Google Gemini (бесплатно)
 Поддерживает: фото еды, голосовые сообщения, текст
-Хранит дневник в SQLite, выдаёт сводку по запросу
-
-Установка зависимостей:
-    pip install aiogram openai aiohttp aiosqlite
-
-Переменные окружения (или замени напрямую):
-    TELEGRAM_TOKEN — токен от @BotFather
-    OPENAI_API_KEY — ключ от OpenAI
 """
 
 import asyncio
 import os
 import sqlite3
 import tempfile
+import json
+import base64
+import aiohttp
 from datetime import date, datetime
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.types import Message
-from openai import AsyncOpenAI
-import aiohttp
-import base64
+
+import google.generativeai as genai
 
 # ── Конфиг ────────────────────────────────────────────────────────────────────
 
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "ВАШ_ТОКЕН_СЮДА")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "ВАШ_КЛЮЧ_СЮДА")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "ВАШ_КЛЮЧ_СЮДА")
 DB_PATH = "calories.db"
+
+genai.configure(api_key=GEMINI_API_KEY)
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 bot = Bot(token=TELEGRAM_TOKEN)
 dp = Dispatcher()
-client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
 # ── База данных ────────────────────────────────────────────────────────────────
 
@@ -54,8 +51,7 @@ def init_db():
     conn.commit()
     conn.close()
 
-def save_meal(user_id: int, food: str, calories: int,
-              protein: float = 0, fat: float = 0, carbs: float = 0):
+def save_meal(user_id, food, calories, protein=0, fat=0, carbs=0):
     now = datetime.now()
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
@@ -67,7 +63,7 @@ def save_meal(user_id: int, food: str, calories: int,
     conn.commit()
     conn.close()
 
-def get_today(user_id: int) -> list[dict]:
+def get_today(user_id):
     today = date.today().strftime("%Y-%m-%d")
     conn = sqlite3.connect(DB_PATH)
     rows = conn.execute(
@@ -79,64 +75,41 @@ def get_today(user_id: int) -> list[dict]:
     return [{"time": r[0], "food": r[1], "calories": r[2],
              "protein": r[3], "fat": r[4], "carbs": r[5]} for r in rows]
 
-# ── GPT-утилиты ───────────────────────────────────────────────────────────────
+# ── Gemini-утилиты ─────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """Ты диетолог-аналитик. Пользователь присылает описание или фото еды/напитка.
-Твой ответ ВСЕГДА строго в формате JSON без лишнего текста:
-{
-  "food": "название блюда/продукта",
-  "weight_g": примерный вес в граммах (число),
-  "calories": калории (число),
-  "protein": белки в граммах (число),
-  "fat": жиры в граммах (число),
-  "carbs": углеводы в граммах (число),
-  "comment": "короткий комментарий (необязательно)"
-}
-Если невозможно определить — делай разумную оценку среднего размера порции."""
+PROMPT = """Ты диетолог-аналитик. Определи калории и БЖУ.
+Ответь ТОЛЬКО в формате JSON без лишнего текста, без markdown:
+{"food":"название","weight_g":100,"calories":200,"protein":10,"fat":5,"carbs":20,"comment":""}"""
 
-async def analyze_text(text: str) -> dict:
-    resp = await client.chat.completions.create(
-        model="gpt-4o",
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user",   "content": text}
-        ]
-    )
-    import json
-    return json.loads(resp.choices[0].message.content)
+def parse_gemini(text):
+    text = text.strip()
+    if "```" in text:
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+    return json.loads(text.strip())
 
-async def analyze_image(image_bytes: bytes) -> dict:
-    b64 = base64.b64encode(image_bytes).decode()
-    import json
-    resp = await client.chat.completions.create(
-        model="gpt-4o",
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": [
-                {"type": "image_url",
-                 "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-                {"type": "text", "text": "Что это за еда? Определи калории."}
-            ]}
-        ]
-    )
-    return json.loads(resp.choices[0].message.content)
+async def analyze_text(text):
+    resp = model.generate_content(f"{PROMPT}\n\nЕда: {text}")
+    return parse_gemini(resp.text)
 
-async def transcribe_voice(ogg_bytes: bytes) -> str:
-    with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as f:
-        f.write(ogg_bytes)
-        tmp_path = f.name
-    with open(tmp_path, "rb") as f:
-        transcript = await client.audio.transcriptions.create(
-            model="whisper-1", file=f, language="ru"
-        )
-    os.unlink(tmp_path)
-    return transcript.text
+async def analyze_image(image_bytes):
+    img = {"mime_type": "image/jpeg", "data": base64.b64encode(image_bytes).decode()}
+    resp = model.generate_content([PROMPT + "\n\nОпредели что на фото и посчитай калории.", img])
+    return parse_gemini(resp.text)
+
+async def transcribe_voice(ogg_bytes):
+    """Конвертируем через Gemini Audio"""
+    audio = {"mime_type": "audio/ogg", "data": base64.b64encode(ogg_bytes).decode()}
+    resp = model.generate_content([
+        "Транскрибируй это голосовое сообщение на русском языке. Верни только текст без пояснений.",
+        audio
+    ])
+    return resp.text.strip()
 
 # ── Форматирование ─────────────────────────────────────────────────────────────
 
-def format_result(data: dict) -> str:
+def format_result(data):
     lines = [
         f"🍽 *{data['food']}*",
         f"⚖️ ~{data.get('weight_g', '?')} г",
@@ -149,7 +122,7 @@ def format_result(data: dict) -> str:
         lines.append(f"💬 _{data['comment']}_")
     return "\n".join(lines)
 
-def format_summary(meals: list[dict]) -> str:
+def format_summary(meals):
     if not meals:
         return "📭 Сегодня записей нет. Отправь фото или опиши что ел!"
 
@@ -269,8 +242,9 @@ async def handle_text(msg: Message):
 
 async def main():
     init_db()
-    print("Бот запущен...")
+    print("Бот запущен (Gemini)...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())
+
