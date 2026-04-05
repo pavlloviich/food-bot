@@ -570,7 +570,7 @@
 <div class="header">
   <div class="header-top">
     <div class="logo">Дневник питания</div>
-    <div style="display:flex;align-items:center;gap:10px"><div class="date-label" id="dateLabel"></div><button class="profile-btn" id="profileBtn">👤</button></div>
+    <div style="display:flex;align-items:center;gap:8px"><div class="date-label" id="dateLabel"></div><button class="profile-btn" id="remindersBtn" title="Напоминания">🔔</button><button class="profile-btn" id="profileBtn" title="Профиль">👤</button></div>
   </div>
   <div class="period-tabs">
     <div class="tab active" data-period="today">Сегодня</div>
@@ -1170,6 +1170,57 @@ function closeProfile() {
   document.getElementById('profileModal').classList.remove('open');
 }
 
+// ── Reminders ─────────────────────────────────────────────────────────────────
+
+let selectedWaterInterval = 2;
+
+function setWaterInterval(n) {
+  selectedWaterInterval = n;
+  document.querySelectorAll('[data-interval]').forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.interval) === n);
+  });
+}
+
+async function openReminders() {
+  if (!userSettings) return;
+  document.getElementById('remBreakfastOn').checked   = !!userSettings.remind_breakfast_enabled;
+  document.getElementById('remBreakfastTime').value   = userSettings.remind_breakfast_time || '09:00';
+  document.getElementById('remLunchOn').checked       = !!userSettings.remind_lunch_enabled;
+  document.getElementById('remLunchTime').value       = userSettings.remind_lunch_time || '13:00';
+  document.getElementById('remDinnerOn').checked      = !!userSettings.remind_dinner_enabled;
+  document.getElementById('remDinnerTime').value      = userSettings.remind_dinner_time || '19:00';
+  document.getElementById('remWaterOn').checked       = !!userSettings.remind_water_enabled;
+  selectedWaterInterval = userSettings.remind_water_interval || 2;
+  document.getElementById('remWaterIntervalRow').style.display = userSettings.remind_water_enabled ? 'block' : 'none';
+  setWaterInterval(selectedWaterInterval);
+  document.getElementById('remindersModal').classList.add('open');
+}
+
+document.getElementById('remWaterOn').addEventListener('change', function() {
+  document.getElementById('remWaterIntervalRow').style.display = this.checked ? 'block' : 'none';
+});
+
+document.getElementById('remindersSaveBtn').addEventListener('click', async () => {
+  const updates = {
+    remind_breakfast_enabled: document.getElementById('remBreakfastOn').checked ? 1 : 0,
+    remind_breakfast_time:    document.getElementById('remBreakfastTime').value,
+    remind_lunch_enabled:     document.getElementById('remLunchOn').checked ? 1 : 0,
+    remind_lunch_time:        document.getElementById('remLunchTime').value,
+    remind_dinner_enabled:    document.getElementById('remDinnerOn').checked ? 1 : 0,
+    remind_dinner_time:       document.getElementById('remDinnerTime').value,
+    remind_water_enabled:     document.getElementById('remWaterOn').checked ? 1 : 0,
+    remind_water_interval:    selectedWaterInterval,
+  };
+  await sb.from('user_settings').update(updates).eq('user_id', userId);
+  Object.assign(userSettings, updates);
+  document.getElementById('remindersModal').classList.remove('open');
+});
+
+document.getElementById('remindersBtn').addEventListener('click', openReminders);
+document.getElementById('remindersModal').addEventListener('click', e => {
+  if (e.target === e.currentTarget) document.getElementById('remindersModal').classList.remove('open');
+});
+
 document.getElementById('profileBtn').addEventListener('click', openProfile);
 document.getElementById('profileModal').addEventListener('click', e => {
   if (e.target === e.currentTarget) document.getElementById('profileModal').classList.remove('open');
@@ -1214,6 +1265,66 @@ document.getElementById('profileModal').addEventListener('click', e => {
     </div>
 
     <button class="submit-btn" id="profileSaveBtn" onclick="closeProfile()" style="margin-top:16px">Готово</button>
+  </div>
+</div>
+
+
+<!-- Reminders modal -->
+<div class="modal-overlay" id="remindersModal">
+  <div class="modal">
+    <div class="modal-title">🔔 Напоминания</div>
+
+    <div class="profile-row">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span>🌅 Завтрак</span>
+        <input type="time" id="remBreakfastTime" value="09:00" class="form-input" style="width:100px;padding:6px 10px">
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="remBreakfastOn" checked style="width:18px;height:18px;accent-color:var(--accent)">
+      </label>
+    </div>
+
+    <div class="profile-row">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span>☀️ Обед</span>
+        <input type="time" id="remLunchTime" value="13:00" class="form-input" style="width:100px;padding:6px 10px">
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="remLunchOn" checked style="width:18px;height:18px;accent-color:var(--accent)">
+      </label>
+    </div>
+
+    <div class="profile-row">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span>🌆 Ужин</span>
+        <input type="time" id="remDinnerTime" value="19:00" class="form-input" style="width:100px;padding:6px 10px">
+      </div>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="remDinnerOn" checked style="width:18px;height:18px;accent-color:var(--accent)">
+      </label>
+    </div>
+
+    <div class="profile-row" style="flex-direction:column;align-items:flex-start;gap:10px">
+      <div style="display:flex;align-items:center;justify-content:space-between;width:100%">
+        <span>💧 Вода</span>
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="remWaterOn" style="width:18px;height:18px;accent-color:var(--accent)">
+        </label>
+      </div>
+      <div id="remWaterIntervalRow" style="display:none;gap:8px;width:100%">
+        <div class="goal-btns" style="grid-template-columns:1fr 1fr 1fr">
+          <div class="goal-btn" data-interval="2" onclick="setWaterInterval(2)">каждые<br>2 ч</div>
+          <div class="goal-btn" data-interval="3" onclick="setWaterInterval(3)">каждые<br>3 ч</div>
+          <div class="goal-btn" data-interval="4" onclick="setWaterInterval(4)">каждые<br>4 ч</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="font-size:12px;color:var(--muted);margin-top:4px;margin-bottom:8px">
+      Бот напомнит через час после указанного времени — если записей ещё нет
+    </div>
+
+    <button class="submit-btn" id="remindersSaveBtn">Сохранить</button>
   </div>
 </div>
 
