@@ -439,6 +439,68 @@
 
   .pb { padding-bottom: 100px; }
 
+  /* ── Weight chart ── */
+  .weight-section {
+    padding: 0 20px 20px;
+  }
+  .weight-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .weight-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+  }
+  .weight-add-btn {
+    padding: 6px 14px;
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: 50px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+  .weight-chart {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  .weight-chart svg { width: 100%; display: block; }
+  .weight-log-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .weight-entry {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .weight-entry-date { font-size: 13px; color: var(--muted); }
+  .weight-entry-val {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--accent);
+  }
+  .weight-entry-diff {
+    font-size: 12px;
+    margin-left: 6px;
+  }
+  .weight-entry-diff.up   { color: var(--danger); }
+  .weight-entry-diff.down { color: var(--accent); }
+
+
   /* ── Profile button ── */
   .profile-btn {
     width: 36px;
@@ -530,7 +592,15 @@
   <button class="add-btn" id="addBtn">+ Добавить</button>
 </div>
 
-<div id="content" class="pb"></div>
+<div id="content"></div>
+<div class="weight-section pb" id="weightSection" style="display:none">
+  <div class="weight-header">
+    <div class="weight-title">⚖️ Динамика веса</div>
+    <button class="weight-add-btn" onclick="addWeightEntry()">+ Записать</button>
+  </div>
+  <div class="weight-chart" id="weightChart"></div>
+  <div class="weight-log-list" id="weightLog"></div>
+</div>
 
 <!-- Meal modal -->
 <div class="modal-overlay" id="mealModal">
@@ -973,6 +1043,112 @@ async function editWaterGoal() {
   await renderAll();
 }
 
+// ── Weight tracking ───────────────────────────────────────────────────────────
+
+async function loadWeightLog() {
+  if (!userId) return [];
+  const { data } = await sb.from('weight_log')
+    .select('*').eq('user_id', userId)
+    .order('date', { ascending: false })
+    .limit(30);
+  return data || [];
+}
+
+async function addWeightEntry() {
+  const cur = userSettings?.weight_kg || '';
+  const val = prompt('Введи текущий вес (кг):', cur);
+  if (!val) return;
+  const w = parseFloat(val.replace(',', '.'));
+  if (isNaN(w) || w < 30 || w > 300) { alert('Некорректный вес'); return; }
+  const today = new Date().toISOString().split('T')[0];
+  await sb.from('weight_log').upsert({ user_id: userId, date: today, weight: w }, { onConflict: 'user_id,date' });
+  // Also update profile weight
+  await sb.from('user_settings').update({ weight_kg: w }).eq('user_id', userId);
+  if (userSettings) userSettings.weight_kg = w;
+  renderWeightSection();
+}
+
+function drawWeightChart(entries) {
+  const el = document.getElementById('weightChart');
+  if (!entries.length) { el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px">Нет данных</div>'; return; }
+
+  const sorted = [...entries].reverse();
+  const weights = sorted.map(e => e.weight);
+  const min = Math.min(...weights) - 1;
+  const max = Math.max(...weights) + 1;
+  const range = max - min || 1;
+
+  const W = 300, H = 120, pad = 20;
+  const pts = sorted.map((e, i) => {
+    const x = pad + (i / Math.max(sorted.length - 1, 1)) * (W - pad * 2);
+    const y = H - pad - ((e.weight - min) / range) * (H - pad * 2);
+    return { x, y, w: e.weight, d: e.date };
+  });
+
+  const path = pts.map((p, i) => (i === 0 ? `M${p.x},${p.y}` : `L${p.x},${p.y}`)).join(' ');
+  const area = path + ` L${pts[pts.length-1].x},${H} L${pts[0].x},${H} Z`;
+
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="wg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#7cffa4" stop-opacity="0.3"/>
+        <stop offset="100%" stop-color="#7cffa4" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <path d="${area}" fill="url(#wg)"/>
+    <path d="${path}" fill="none" stroke="#7cffa4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    ${pts.map(p => `<circle cx="${p.x}" cy="${p.y}" r="3" fill="#7cffa4"/>`).join('')}
+    <text x="${pts[0].x}" y="${H-4}" fill="#6b7080" font-size="9" text-anchor="middle">${pts[0].d.slice(5)}</text>
+    ${pts.length > 1 ? `<text x="${pts[pts.length-1].x}" y="${H-4}" fill="#6b7080" font-size="9" text-anchor="middle">${pts[pts.length-1].d.slice(5)}</text>` : ''}
+    <text x="${pts[pts.length-1].x}" y="${pts[pts.length-1].y - 8}" fill="#7cffa4" font-size="10" text-anchor="middle" font-weight="bold">${pts[pts.length-1].w} кг</text>
+  </svg>`;
+}
+
+async function renderWeightSection() {
+  const entries = await loadWeightLog();
+  drawWeightChart(entries);
+
+  const log = document.getElementById('weightLog');
+  if (!entries.length) { log.innerHTML = ''; return; }
+
+  log.innerHTML = entries.map((e, i) => {
+    const prev = entries[i + 1];
+    let diff = '';
+    if (prev) {
+      const d = (e.weight - prev.weight).toFixed(1);
+      const cls = d > 0 ? 'up' : 'down';
+      const sign = d > 0 ? '+' : '';
+      diff = `<span class="weight-entry-diff ${cls}">${sign}${d}</span>`;
+    }
+    return `<div class="weight-entry">
+      <div class="weight-entry-date">${new Date(e.date + 'T00:00:00').toLocaleDateString('ru', {day:'numeric',month:'short'})}</div>
+      <div style="display:flex;align-items:center">
+        <div class="weight-entry-val">${e.weight} кг</div>${diff}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function openWeightSection() {
+  document.getElementById('profileModal').classList.remove('open');
+  document.getElementById('weightSection').style.display = 'block';
+  document.getElementById('content').style.display = 'none';
+  document.querySelector('.section-tabs').style.display = 'none';
+  document.querySelector('.section-header').style.display = 'none';
+  renderWeightSection();
+}
+
+function closeWeightSection() {
+  document.getElementById('weightSection').style.display = 'none';
+  document.getElementById('content').style.display = 'block';
+  document.querySelector('.section-tabs').style.display = 'flex';
+  document.querySelector('.section-header').style.display = 'flex';
+}
+
+function closeProfile() {
+  document.getElementById('profileModal').classList.remove('open');
+}
+
 document.getElementById('profileBtn').addEventListener('click', openProfile);
 document.getElementById('profileModal').addEventListener('click', e => {
   if (e.target === e.currentTarget) document.getElementById('profileModal').classList.remove('open');
@@ -1011,6 +1187,12 @@ document.getElementById('profileModal').addEventListener('click', e => {
       <div class="profile-row-value editable" id="profileWaterGoal" onclick="editWaterGoal()">— мл</div>
     </div>
 
+    <div class="profile-row" style="border-bottom:none;padding-top:8px">
+      <div class="profile-row-label">📈 Динамика веса</div>
+      <div class="profile-row-value editable" onclick="openWeightSection()">Смотреть →</div>
+    </div>
+
+    <button class="submit-btn" id="profileSaveBtn" onclick="closeProfile()" style="margin-top:16px">Готово</button>
   </div>
 </div>
 
