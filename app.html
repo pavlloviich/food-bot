@@ -979,198 +979,7 @@ async function init() {
 
 init();
 
-// ── Profile ───────────────────────────────────────────────────────────────────
-
-function openProfile() {
-  if (!userSettings) return;
-  const w = userSettings.weight_kg;
-  document.getElementById('profileWeight').textContent = w ? w + ' кг' : '— кг';
-  document.getElementById('profileCalGoal').textContent = (userSettings.calories_goal || 2000) + ' ккал';
-  document.getElementById('profileWaterGoal').textContent = (userSettings.water_goal_ml || 2500) + ' мл';
-  const goal = userSettings.goal || 'maintain';
-  document.querySelectorAll('.goal-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.goal === goal);
-  });
-  document.getElementById('profileModal').classList.add('open');
-}
-
-async function editWeight() {
-  const cur = userSettings?.weight_kg || '';
-  const val = prompt('Введи вес (кг):', cur);
-  if (!val) return;
-  const w = parseFloat(val.replace(',', '.'));
-  if (isNaN(w) || w < 30 || w > 300) { alert('Некорректный вес'); return; }
-  await sb.from('user_settings').update({ weight_kg: w }).eq('user_id', userId);
-  userSettings.weight_kg = w;
-  document.getElementById('profileWeight').textContent = w + ' кг';
-}
-
-async function setGoal(goal) {
-  const goalMap = {
-    lose:     userSettings.calories_deficit || ((userSettings.calories_goal || 2000) - 500),
-    maintain: userSettings.calories_goal    || 2000,
-    gain:     userSettings.calories_surplus || ((userSettings.calories_goal || 2000) + 300),
-  };
-  const newCal = goalMap[goal];
-  await sb.from('user_settings').update({ goal, calories_goal: newCal }).eq('user_id', userId);
-  userSettings.goal = goal;
-  userSettings.calories_goal = newCal;
-  document.getElementById('profileCalGoal').textContent = newCal + ' ккал';
-  document.querySelectorAll('.goal-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.goal === goal);
-  });
-  await renderAll();
-}
-
-async function editCalGoal() {
-  const cur = userSettings?.calories_goal || 2000;
-  const val = prompt('Введи норму калорий:', cur);
-  if (!val) return;
-  const cal = parseInt(val);
-  if (isNaN(cal) || cal < 500 || cal > 10000) { alert('Некорректное значение'); return; }
-  await sb.from('user_settings').update({ calories_goal: cal }).eq('user_id', userId);
-  userSettings.calories_goal = cal;
-  document.getElementById('profileCalGoal').textContent = cal + ' ккал';
-  await renderAll();
-}
-
-async function editWaterGoal() {
-  const cur = userSettings?.water_goal_ml || 2500;
-  const val = prompt('Введи норму воды (мл):', cur);
-  if (!val) return;
-  const ml = parseInt(val);
-  if (isNaN(ml) || ml < 500 || ml > 10000) { alert('Некорректное значение'); return; }
-  await sb.from('user_settings').update({ water_goal_ml: ml }).eq('user_id', userId);
-  userSettings.water_goal_ml = ml;
-  document.getElementById('profileWaterGoal').textContent = ml + ' мл';
-  await renderAll();
-}
-
-// ── Weight tracking ───────────────────────────────────────────────────────────
-
-async function loadWeightLog() {
-  if (!userId) return [];
-  const { data } = await sb.from('weight_log')
-    .select('*').eq('user_id', userId)
-    .order('date', { ascending: false })
-    .limit(30);
-  return data || [];
-}
-
-async function addWeightEntry() {
-  const cur = userSettings?.weight_kg || '';
-  const val = prompt('Введи текущий вес (кг):', cur);
-  if (!val) return;
-  const w = parseFloat(val.replace(',', '.'));
-  if (isNaN(w) || w < 30 || w > 300) { alert('Некорректный вес'); return; }
-  const today = new Date().toISOString().split('T')[0];
-  await sb.from('weight_log').upsert({ user_id: userId, date: today, weight: w }, { onConflict: 'user_id,date' });
-  // Also update profile weight
-  await sb.from('user_settings').update({ weight_kg: w }).eq('user_id', userId);
-  if (userSettings) userSettings.weight_kg = w;
-  renderWeightSection();
-}
-
-function drawWeightChart(entries) {
-  const el = document.getElementById('weightChart');
-  if (!entries.length) { el.innerHTML = '<div style="text-align:center;color:var(--muted);padding:20px">Нет данных</div>'; return; }
-
-  const sorted = [...entries].reverse();
-  const weights = sorted.map(e => e.weight);
-  const min = Math.min(...weights) - 1;
-  const max = Math.max(...weights) + 1;
-  const range = max - min || 1;
-
-  const W = 300, H = 120, pad = 20;
-  const pts = sorted.map((e, i) => {
-    const x = pad + (i / Math.max(sorted.length - 1, 1)) * (W - pad * 2);
-    const y = H - pad - ((e.weight - min) / range) * (H - pad * 2);
-    return { x, y, w: e.weight, d: e.date };
-  });
-
-  const path = pts.map((p, i) => (i === 0 ? `M${p.x},${p.y}` : `L${p.x},${p.y}`)).join(' ');
-  const area = path + ` L${pts[pts.length-1].x},${H} L${pts[0].x},${H} Z`;
-
-  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
-    <defs>
-      <linearGradient id="wg" x1="0" y1="0" x2="0" y2="1">
-        <stop offset="0%" stop-color="#7cffa4" stop-opacity="0.3"/>
-        <stop offset="100%" stop-color="#7cffa4" stop-opacity="0"/>
-      </linearGradient>
-    </defs>
-    <path d="${area}" fill="url(#wg)"/>
-    <path d="${path}" fill="none" stroke="#7cffa4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-    ${pts.map(p => `<circle cx="${p.x}" cy="${p.y}" r="3" fill="#7cffa4"/>`).join('')}
-    <text x="${pts[0].x}" y="${H-4}" fill="#6b7080" font-size="9" text-anchor="middle">${pts[0].d.slice(5)}</text>
-    ${pts.length > 1 ? `<text x="${pts[pts.length-1].x}" y="${H-4}" fill="#6b7080" font-size="9" text-anchor="middle">${pts[pts.length-1].d.slice(5)}</text>` : ''}
-    <text x="${pts[pts.length-1].x}" y="${pts[pts.length-1].y - 8}" fill="#7cffa4" font-size="10" text-anchor="middle" font-weight="bold">${pts[pts.length-1].w} кг</text>
-  </svg>`;
-}
-
-async function renderWeightSection() {
-  const entries = await loadWeightLog();
-  drawWeightChart(entries);
-
-  const log = document.getElementById('weightLog');
-  if (!entries.length) { log.innerHTML = ''; return; }
-
-  log.innerHTML = entries.map((e, i) => {
-    const prev = entries[i + 1];
-    let diff = '';
-    if (prev) {
-      const d = (e.weight - prev.weight).toFixed(1);
-      const cls = d > 0 ? 'up' : 'down';
-      const sign = d > 0 ? '+' : '';
-      diff = `<span class="weight-entry-diff ${cls}">${sign}${d}</span>`;
-    }
-    return `<div class="weight-entry">
-      <div class="weight-entry-date">${new Date(e.date + 'T00:00:00').toLocaleDateString('ru', {day:'numeric',month:'short'})}</div>
-      <div style="display:flex;align-items:center;gap:8px">
-        <div class="weight-entry-val">${e.weight} кг</div>${diff}
-        <button class="icon-btn edit" onclick="editWeightEntry(${e.id}, ${e.weight}, '${e.date}')" style="width:26px;height:26px;font-size:12px">✏️</button>
-        <button class="icon-btn del" onclick="deleteWeightEntry(${e.id})" style="width:26px;height:26px;font-size:12px">✕</button>
-      </div>
-    </div>`;
-  }).join('');
-}
-
-function openWeightSection() {
-  document.getElementById('profileModal').classList.remove('open');
-  document.getElementById('weightSection').style.display = 'block';
-  document.getElementById('content').style.display = 'none';
-  document.querySelector('.section-tabs').style.display = 'none';
-  document.querySelector('.section-header').style.display = 'none';
-  renderWeightSection();
-}
-
-
-async function editWeightEntry(id, currentWeight, date) {
-  const val = prompt('Измени вес (кг):', currentWeight);
-  if (!val) return;
-  const w = parseFloat(val.replace(',', '.'));
-  if (isNaN(w) || w < 30 || w > 300) { alert('Некорректный вес'); return; }
-  await sb.from('weight_log').update({ weight: w }).eq('id', id);
-  renderWeightSection();
-}
-
-async function deleteWeightEntry(id) {
-  if (!confirm('Удалить эту запись?')) return;
-  await sb.from('weight_log').delete().eq('id', id);
-  renderWeightSection();
-}
-
-function closeWeightSection() {
-  document.getElementById('weightSection').style.display = 'none';
-  document.getElementById('content').style.display = 'block';
-  document.querySelector('.section-tabs').style.display = 'flex';
-  document.querySelector('.section-header').style.display = 'flex';
-}
-
-function closeProfile() {
-  document.getElementById('profileModal').classList.remove('open');
-}
-
-// ── Reminders ─────────────────────────────────────────────────────────────────
+// ── Reminders UI ──────────────────────────────────────────────────────────────
 
 let selectedWaterInterval = 2;
 
@@ -1182,7 +991,7 @@ function setWaterInterval(n) {
 }
 
 async function openReminders() {
-  if (!userSettings) return;
+  if (!userSettings) { alert('Загрузка...'); return; }
   document.getElementById('remBreakfastOn').checked   = !!userSettings.remind_breakfast_enabled;
   document.getElementById('remBreakfastTime').value   = userSettings.remind_breakfast_time || '09:00';
   document.getElementById('remLunchOn').checked       = !!userSettings.remind_lunch_enabled;
@@ -1196,137 +1005,36 @@ async function openReminders() {
   document.getElementById('remindersModal').classList.add('open');
 }
 
-document.getElementById('remWaterOn').addEventListener('change', function() {
-  document.getElementById('remWaterIntervalRow').style.display = this.checked ? 'block' : 'none';
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('profileBtn').addEventListener('click', openProfile);
+  document.getElementById('remindersBtn').addEventListener('click', openReminders);
+
+  document.getElementById('profileModal').addEventListener('click', e => {
+    if (e.target === e.currentTarget) document.getElementById('profileModal').classList.remove('open');
+  });
+  document.getElementById('remindersModal').addEventListener('click', e => {
+    if (e.target === e.currentTarget) document.getElementById('remindersModal').classList.remove('open');
+  });
+
+  document.getElementById('remWaterOn').addEventListener('change', function() {
+    document.getElementById('remWaterIntervalRow').style.display = this.checked ? 'block' : 'none';
+  });
+
+  document.getElementById('remindersSaveBtn').addEventListener('click', async () => {
+    if (!userId) return;
+    const updates = {
+      remind_breakfast_enabled: document.getElementById('remBreakfastOn').checked ? 1 : 0,
+      remind_breakfast_time:    document.getElementById('remBreakfastTime').value,
+      remind_lunch_enabled:     document.getElementById('remLunchOn').checked ? 1 : 0,
+      remind_lunch_time:        document.getElementById('remLunchTime').value,
+      remind_dinner_enabled:    document.getElementById('remDinnerOn').checked ? 1 : 0,
+      remind_dinner_time:       document.getElementById('remDinnerTime').value,
+      remind_water_enabled:     document.getElementById('remWaterOn').checked ? 1 : 0,
+      remind_water_interval:    selectedWaterInterval,
+    };
+    await sb.from('user_settings').update(updates).eq('user_id', userId);
+    Object.assign(userSettings, updates);
+    document.getElementById('remindersModal').classList.remove('open');
+  });
 });
 
-document.getElementById('remindersSaveBtn').addEventListener('click', async () => {
-  const updates = {
-    remind_breakfast_enabled: document.getElementById('remBreakfastOn').checked ? 1 : 0,
-    remind_breakfast_time:    document.getElementById('remBreakfastTime').value,
-    remind_lunch_enabled:     document.getElementById('remLunchOn').checked ? 1 : 0,
-    remind_lunch_time:        document.getElementById('remLunchTime').value,
-    remind_dinner_enabled:    document.getElementById('remDinnerOn').checked ? 1 : 0,
-    remind_dinner_time:       document.getElementById('remDinnerTime').value,
-    remind_water_enabled:     document.getElementById('remWaterOn').checked ? 1 : 0,
-    remind_water_interval:    selectedWaterInterval,
-  };
-  await sb.from('user_settings').update(updates).eq('user_id', userId);
-  Object.assign(userSettings, updates);
-  document.getElementById('remindersModal').classList.remove('open');
-});
-
-document.getElementById('remindersBtn').addEventListener('click', openReminders);
-document.getElementById('remindersModal').addEventListener('click', e => {
-  if (e.target === e.currentTarget) document.getElementById('remindersModal').classList.remove('open');
-});
-
-document.getElementById('profileBtn').addEventListener('click', openProfile);
-document.getElementById('profileModal').addEventListener('click', e => {
-  if (e.target === e.currentTarget) document.getElementById('profileModal').classList.remove('open');
-});
-
-</script>
-
-<!-- Profile modal -->
-<div class="modal-overlay" id="profileModal">
-  <div class="modal">
-    <div class="modal-title">Профиль</div>
-
-    <div class="profile-row">
-      <div class="profile-row-label">⚖️ Вес</div>
-      <div class="profile-row-value editable" id="profileWeight" onclick="editWeight()">— кг</div>
-    </div>
-
-    <div class="profile-row">
-      <div class="profile-row-label">🎯 Цель</div>
-      <div style="margin-top:4px">
-        <div class="goal-btns">
-          <div class="goal-btn" data-goal="lose" onclick="setGoal('lose')">📉<br>Похудеть</div>
-          <div class="goal-btn" data-goal="maintain" onclick="setGoal('maintain')">⚖️<br>Поддержать</div>
-          <div class="goal-btn" data-goal="gain" onclick="setGoal('gain')">📈<br>Набрать</div>
-        </div>
-      </div>
-    </div>
-
-    <div class="profile-row">
-      <div class="profile-row-label">🔥 Норма калорий</div>
-      <div class="profile-row-value editable" id="profileCalGoal" onclick="editCalGoal()">— ккал</div>
-    </div>
-
-    <div class="profile-row">
-      <div class="profile-row-label">💧 Норма воды</div>
-      <div class="profile-row-value editable" id="profileWaterGoal" onclick="editWaterGoal()">— мл</div>
-    </div>
-
-    <div class="profile-row" style="border-bottom:none;padding-top:8px">
-      <div class="profile-row-label">📈 Динамика веса</div>
-      <div class="profile-row-value editable" onclick="openWeightSection()">Смотреть →</div>
-    </div>
-
-    <button class="submit-btn" id="profileSaveBtn" onclick="closeProfile()" style="margin-top:16px">Готово</button>
-  </div>
-</div>
-
-
-<!-- Reminders modal -->
-<div class="modal-overlay" id="remindersModal">
-  <div class="modal">
-    <div class="modal-title">🔔 Напоминания</div>
-
-    <div class="profile-row">
-      <div style="display:flex;align-items:center;gap:8px">
-        <span>🌅 Завтрак</span>
-        <input type="time" id="remBreakfastTime" value="09:00" class="form-input" style="width:100px;padding:6px 10px">
-      </div>
-      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-        <input type="checkbox" id="remBreakfastOn" checked style="width:18px;height:18px;accent-color:var(--accent)">
-      </label>
-    </div>
-
-    <div class="profile-row">
-      <div style="display:flex;align-items:center;gap:8px">
-        <span>☀️ Обед</span>
-        <input type="time" id="remLunchTime" value="13:00" class="form-input" style="width:100px;padding:6px 10px">
-      </div>
-      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-        <input type="checkbox" id="remLunchOn" checked style="width:18px;height:18px;accent-color:var(--accent)">
-      </label>
-    </div>
-
-    <div class="profile-row">
-      <div style="display:flex;align-items:center;gap:8px">
-        <span>🌆 Ужин</span>
-        <input type="time" id="remDinnerTime" value="19:00" class="form-input" style="width:100px;padding:6px 10px">
-      </div>
-      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-        <input type="checkbox" id="remDinnerOn" checked style="width:18px;height:18px;accent-color:var(--accent)">
-      </label>
-    </div>
-
-    <div class="profile-row" style="flex-direction:column;align-items:flex-start;gap:10px">
-      <div style="display:flex;align-items:center;justify-content:space-between;width:100%">
-        <span>💧 Вода</span>
-        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-          <input type="checkbox" id="remWaterOn" style="width:18px;height:18px;accent-color:var(--accent)">
-        </label>
-      </div>
-      <div id="remWaterIntervalRow" style="display:none;gap:8px;width:100%">
-        <div class="goal-btns" style="grid-template-columns:1fr 1fr 1fr">
-          <div class="goal-btn" data-interval="2" onclick="setWaterInterval(2)">каждые<br>2 ч</div>
-          <div class="goal-btn" data-interval="3" onclick="setWaterInterval(3)">каждые<br>3 ч</div>
-          <div class="goal-btn" data-interval="4" onclick="setWaterInterval(4)">каждые<br>4 ч</div>
-        </div>
-      </div>
-    </div>
-
-    <div style="font-size:12px;color:var(--muted);margin-top:4px;margin-bottom:8px">
-      Бот напомнит через час после указанного времени — если записей ещё нет
-    </div>
-
-    <button class="submit-btn" id="remindersSaveBtn">Сохранить</button>
-  </div>
-</div>
-
-</body>
-</html>
