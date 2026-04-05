@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>EasyFoodTrack</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500&display=swap');
+
+  :root {
+    --bg: #0e0f12;
+    --surface: #16181f;
+    --surface2: #1e2029;
+    --border: #2a2d3a;
+    --accent: #7cffa4;
+    --accent2: #4ef0ff;
+    --danger: #ff5f5f;
+    --text: #f0f2f8;
+    --muted: #6b7080;
+    --radius: 16px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Header ── */
+  .header {
+    padding: 20px 20px 0;
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 100;
+  }
+
+  .header-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+
+  .logo {
+    font-family: 'Syne', sans-serif;
+    font-weight: 800;
+    font-size: 20px;
+    letter-spacing: -0.5px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .date-label {
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  /* ── Period tabs ── */
+  .period-tabs {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 16px;
+    scrollbar-width: none;
+  }
+  .period-tabs::-webkit-scrollbar { display: none; }
+
+  .tab {
+    flex-shrink: 0;
+    padding: 8px 16px;
+    border-radius: 50px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    transition: all 0.2s;
+  }
+  .tab.active {
+    background: var(--accent);
+    color: #000;
+    border-color: var(--accent);
+    font-weight: 700;
+  }
+
+  /* ── Summary cards ── */
+  .summary-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    padding: 0 20px 16px;
+  }
+
+  .summary-card {
+    background: var(--surface);
+    border-radius: var(--radius);
+    padding: 14px;
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .summary-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+  }
+
+  .card-label {
+    font-size: 11px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+
+  .card-value {
+    font-family: 'Syne', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .card-unit {
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .card-bar {
+    height: 3px;
+    background: var(--border);
+    border-radius: 3px;
+    margin-top: 8px;
+    overflow: hidden;
+  }
+
+  .card-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    transition: width 0.5s ease;
+  }
+
+  /* ── Meal list ── */
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px 12px;
+  }
+
+  .section-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 16px;
+    font-weight: 700;
+  }
+
+  .add-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: 50px;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: 'DM Sans', sans-serif;
+  }
+
+  .meals-list {
+    padding: 0 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .meal-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    animation: slideIn 0.3s ease;
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .meal-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    background: var(--surface2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+
+  .meal-info { flex: 1; min-width: 0; }
+
+  .meal-name {
+    font-weight: 500;
+    font-size: 14px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 2px;
+  }
+
+  .meal-meta {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .meal-cal {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+
+  .meal-delete {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+    transition: all 0.2s;
+  }
+  .meal-delete:active {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: white;
+  }
+
+  /* ── Day groups (for week/month) ── */
+  .day-group { margin-bottom: 20px; }
+
+  .day-header {
+    padding: 0 20px 8px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .day-date {
+    font-family: 'Syne', sans-serif;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--muted);
+  }
+
+  .day-total {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--accent);
+  }
+
+  /* ── Empty state ── */
+  .empty {
+    padding: 60px 20px;
+    text-align: center;
+  }
+
+  .empty-icon { font-size: 48px; margin-bottom: 16px; }
+
+  .empty-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+
+  .empty-sub { color: var(--muted); font-size: 14px; }
+
+  /* ── Modal ── */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 200;
+    display: flex;
+    align-items: flex-end;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s;
+  }
+  .modal-overlay.open {
+    opacity: 1;
+    pointer-events: all;
+  }
+
+  .modal {
+    background: var(--surface);
+    border-radius: 24px 24px 0 0;
+    padding: 24px 20px 40px;
+    width: 100%;
+    transform: translateY(100%);
+    transition: transform 0.3s ease;
+    border-top: 1px solid var(--border);
+  }
+  .modal-overlay.open .modal { transform: translateY(0); }
+
+  .modal-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 20px;
+    text-align: center;
+  }
+
+  .form-group { margin-bottom: 14px; }
+
+  .form-label {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .form-input {
+    width: 100%;
+    padding: 12px 14px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text);
+    font-size: 15px;
+    font-family: 'DM Sans', sans-serif;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .form-input:focus { border-color: var(--accent); }
+
+  .form-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+
+  .submit-btn {
+    width: 100%;
+    padding: 16px;
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: 14px;
+    font-size: 16px;
+    font-weight: 700;
+    cursor: pointer;
+    margin-top: 8px;
+    font-family: 'Syne', sans-serif;
+  }
+
+  /* ── Loading ── */
+  .loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 20px;
+    gap: 16px;
+  }
+
+  .spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .pb { padding-bottom: 100px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-top">
+    <div class="logo">EasyFoodTrack</div>
+    <div class="date-label" id="dateLabel"></div>
+  </div>
+  <div class="period-tabs">
+    <div class="tab active" data-period="today">Сегодня</div>
+    <div class="tab" data-period="week">7 дней</div>
+    <div class="tab" data-period="month">30 дней</div>
+    <div class="tab" data-period="custom">Выбрать</div>
+  </div>
+</div>
+
+<div id="summaryRow" class="summary-row"></div>
+
+<div class="section-header">
+  <div class="section-title">Дневник</div>
+  <button class="add-btn" id="addBtn">+ Добавить</button>
+</div>
+
+<div id="content" class="pb"></div>
+
+<!-- Add meal modal -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-title">Добавить блюдо</div>
+    <div class="form-group">
+      <label class="form-label">Название блюда</label>
+      <input type="text" class="form-input" id="foodName" placeholder="Например: гречка с курицей">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Калории</label>
+      <input type="number" class="form-input" id="foodCal" placeholder="350">
+    </div>
+    <div class="form-group">
+      <label class="form-label">БЖУ (необязательно)</label>
+      <div class="form-row">
+        <input type="number" class="form-input" id="foodP" placeholder="Б">
+        <input type="number" class="form-input" id="foodF" placeholder="Ж">
+        <input type="number" class="form-input" id="foodC" placeholder="У">
+      </div>
+    </div>
+    <button class="submit-btn" id="submitBtn">Сохранить</button>
+  </div>
+</div>
+
+<script>
+// ── Config ──────────────────────────────────────────────────────────────────
+const SUPABASE_URL = 'SUPABASE_URL_HERE';
+const SUPABASE_KEY = 'SUPABASE_ANON_KEY_HERE';
+
+const { createClient } = supabase;
+const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ── Telegram WebApp ──────────────────────────────────────────────────────────
+const tg = window.Telegram?.WebApp;
+if (tg) {
+  tg.ready();
+  tg.expand();
+  tg.setHeaderColor('#0e0f12');
+  tg.setBackgroundColor('#0e0f12');
+}
+
+const userId = tg?.initDataUnsafe?.user?.id || null;
+
+// ── State ────────────────────────────────────────────────────────────────────
+let currentPeriod = 'today';
+let userSettings  = null;
+let customStart   = null;
+let customEnd     = null;
+
+// ── Date utils ───────────────────────────────────────────────────────────────
+function today() {
+  return new Date().toISOString().split('T')[0];
+}
+
+function daysAgo(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().split('T')[0];
+}
+
+function fmtDate(str) {
+  const d = new Date(str + 'T00:00:00');
+  return d.toLocaleDateString('ru', { day: 'numeric', month: 'short' });
+}
+
+function getPeriodDates() {
+  const t = today();
+  if (currentPeriod === 'today')  return { start: t, end: t };
+  if (currentPeriod === 'week')   return { start: daysAgo(6), end: t };
+  if (currentPeriod === 'month')  return { start: daysAgo(29), end: t };
+  if (currentPeriod === 'custom') return { start: customStart || t, end: customEnd || t };
+  return { start: t, end: t };
+}
+
+// ── Food emoji ───────────────────────────────────────────────────────────────
+function foodEmoji(name) {
+  const n = name.toLowerCase();
+  if (n.includes('кофе') || n.includes('чай')) return '☕';
+  if (n.includes('яйц')) return '🥚';
+  if (n.includes('салат')) return '🥗';
+  if (n.includes('суп') || n.includes('борщ')) return '🍲';
+  if (n.includes('рис')) return '🍚';
+  if (n.includes('курица') || n.includes('chicken')) return '🍗';
+  if (n.includes('рыб') || n.includes('лосось')) return '🐟';
+  if (n.includes('пицц')) return '🍕';
+  if (n.includes('бургер') || n.includes('сэндвич')) return '🍔';
+  if (n.includes('паст') || n.includes('макарон')) return '🍝';
+  if (n.includes('гречк')) return '🌾';
+  if (n.includes('овощ') || n.includes('брокколи')) return '🥦';
+  if (n.includes('фрукт') || n.includes('яблок')) return '🍎';
+  if (n.includes('творог') || n.includes('йогурт')) return '🥛';
+  if (n.includes('хлеб') || n.includes('тост')) return '🍞';
+  if (n.includes('шоколад') || n.includes('конфет')) return '🍫';
+  return '🍽';
+}
+
+// ── Load data ────────────────────────────────────────────────────────────────
+async function loadSettings() {
+  if (!userId) return null;
+  const { data } = await sb.from('user_settings').select('*').eq('user_id', userId).single();
+  return data;
+}
+
+async function loadMeals(start, end) {
+  if (!userId) return [];
+  const { data } = await sb.from('meals')
+    .select('*')
+    .eq('user_id', userId)
+    .gte('date', start)
+    .lte('date', end)
+    .order('date').order('time');
+  return data || [];
+}
+
+async function loadWater(start, end) {
+  if (!userId) return 0;
+  const { data } = await sb.from('water')
+    .select('amount_ml')
+    .eq('user_id', userId)
+    .gte('date', start)
+    .lte('date', end);
+  return (data || []).reduce((s, r) => s + r.amount_ml, 0);
+}
+
+async function loadBurned(start, end) {
+  if (!userId) return 0;
+  const { data } = await sb.from('burned')
+    .select('calories')
+    .eq('user_id', userId)
+    .gte('date', start)
+    .lte('date', end);
+  return (data || []).reduce((s, r) => s + r.calories, 0);
+}
+
+// ── Delete meal ───────────────────────────────────────────────────────────────
+async function deleteMeal(id) {
+  await sb.from('meals').delete().eq('id', id);
+  renderAll();
+}
+
+// ── Add meal ──────────────────────────────────────────────────────────────────
+async function addMeal(food, calories, protein, fat, carbs) {
+  const now = new Date();
+  const dateStr = now.toISOString().split('T')[0];
+  const timeStr = now.toTimeString().slice(0,5);
+  await sb.from('meals').insert({
+    user_id: userId,
+    date: dateStr,
+    time: timeStr,
+    food, calories,
+    protein: protein || 0,
+    fat: fat || 0,
+    carbs: carbs || 0
+  });
+  renderAll();
+}
+
+// ── Render ────────────────────────────────────────────────────────────────────
+function renderSummary(meals, waterMl, burnedCal, settings) {
+  const totalCal = meals.reduce((s, m) => s + m.calories, 0);
+  const calGoal  = settings?.calories_goal || 2000;
+  const waterGoal = settings?.water_goal_ml || 2500;
+  const calPct   = Math.min(totalCal / calGoal, 1);
+  const waterPct = Math.min(waterMl / waterGoal, 1);
+
+  document.getElementById('summaryRow').innerHTML = `
+    <div class="summary-card">
+      <div class="card-label">Калории</div>
+      <div class="card-value">${totalCal}<span class="card-unit"> / ${calGoal}</span></div>
+      <div class="card-bar"><div class="card-bar-fill" style="width:${calPct*100}%"></div></div>
+    </div>
+    <div class="summary-card">
+      <div class="card-label">Вода</div>
+      <div class="card-value">${waterMl}<span class="card-unit"> мл</span></div>
+      <div class="card-bar"><div class="card-bar-fill" style="width:${waterPct*100}%;background:linear-gradient(90deg,#4ef0ff,#7cffa4)"></div></div>
+    </div>
+    ${burnedCal ? `
+    <div class="summary-card">
+      <div class="card-label">Сожжено</div>
+      <div class="card-value">${burnedCal}<span class="card-unit"> ккал</span></div>
+    </div>
+    <div class="summary-card">
+      <div class="card-label">Баланс</div>
+      <div class="card-value" style="color:${burnedCal-totalCal>0?'var(--accent)':'var(--danger)'}">
+        ${burnedCal-totalCal>0?'+':''}${burnedCal-totalCal}
+      </div>
+    </div>` : ''}
+  `;
+}
+
+function renderMeals(meals) {
+  const content = document.getElementById('content');
+
+  if (!meals.length) {
+    content.innerHTML = `
+      <div class="empty">
+        <div class="empty-icon">🍽</div>
+        <div class="empty-title">Пусто</div>
+        <div class="empty-sub">Нет записей за этот период</div>
+      </div>`;
+    return;
+  }
+
+  if (currentPeriod === 'today') {
+    content.innerHTML = `<div class="meals-list">
+      ${meals.map(m => `
+        <div class="meal-card">
+          <div class="meal-icon">${foodEmoji(m.food)}</div>
+          <div class="meal-info">
+            <div class="meal-name">${m.food}</div>
+            <div class="meal-meta">${m.time} · Б${(m.protein||0).toFixed(0)} Ж${(m.fat||0).toFixed(0)} У${(m.carbs||0).toFixed(0)}</div>
+          </div>
+          <div class="meal-cal">${m.calories}</div>
+          <button class="meal-delete" onclick="deleteMeal(${m.id})">✕</button>
+        </div>
+      `).join('')}
+    </div>`;
+  } else {
+    // Group by date
+    const byDay = {};
+    meals.forEach(m => {
+      if (!byDay[m.date]) byDay[m.date] = [];
+      byDay[m.date].push(m);
+    });
+
+    content.innerHTML = Object.entries(byDay).reverse().map(([date, dayMeals]) => {
+      const total = dayMeals.reduce((s, m) => s + m.calories, 0);
+      return `
+        <div class="day-group">
+          <div class="day-header">
+            <div class="day-date">${fmtDate(date)}</div>
+            <div class="day-total">${total} ккал</div>
+          </div>
+          <div class="meals-list">
+            ${dayMeals.map(m => `
+              <div class="meal-card">
+                <div class="meal-icon">${foodEmoji(m.food)}</div>
+                <div class="meal-info">
+                  <div class="meal-name">${m.food}</div>
+                  <div class="meal-meta">${m.time}</div>
+                </div>
+                <div class="meal-cal">${m.calories}</div>
+                <button class="meal-delete" onclick="deleteMeal(${m.id})">✕</button>
+              </div>
+            `).join('')}
+          </div>
+        </div>`;
+    }).join('');
+  }
+}
+
+async function renderAll() {
+  const { start, end } = getPeriodDates();
+  const [meals, waterMl, burnedCal] = await Promise.all([
+    loadMeals(start, end),
+    loadWater(start, end),
+    loadBurned(start, end),
+  ]);
+  renderSummary(meals, waterMl, burnedCal, userSettings);
+  renderMeals(meals);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+async function init() {
+  document.getElementById('dateLabel').textContent = new Date().toLocaleDateString('ru', {
+    day: 'numeric', month: 'long'
+  });
+
+  document.getElementById('content').innerHTML = `<div class="loading"><div class="spinner"></div></div>`;
+
+  userSettings = await loadSettings();
+  await renderAll();
+
+  // Period tabs
+  document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', async () => {
+      const period = tab.dataset.period;
+      if (period === 'custom') {
+        const start = prompt('Начало (ГГГГ-ММ-ДД):');
+        const end   = prompt('Конец (ГГГГ-ММ-ДД):');
+        if (!start || !end) return;
+        customStart = start;
+        customEnd   = end;
+      }
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      currentPeriod = period;
+      document.getElementById('content').innerHTML = `<div class="loading"><div class="spinner"></div></div>`;
+      await renderAll();
+    });
+  });
+
+  // Add modal
+  document.getElementById('addBtn').addEventListener('click', () => {
+    document.getElementById('modalOverlay').classList.add('open');
+  });
+
+  document.getElementById('modalOverlay').addEventListener('click', e => {
+    if (e.target === e.currentTarget) {
+      document.getElementById('modalOverlay').classList.remove('open');
+    }
+  });
+
+  document.getElementById('submitBtn').addEventListener('click', async () => {
+    const food = document.getElementById('foodName').value.trim();
+    const cal  = parseInt(document.getElementById('foodCal').value);
+    const p    = parseFloat(document.getElementById('foodP').value) || 0;
+    const f    = parseFloat(document.getElementById('foodF').value) || 0;
+    const c    = parseFloat(document.getElementById('foodC').value) || 0;
+    if (!food || !cal) { alert('Заполни название и калории'); return; }
+    document.getElementById('submitBtn').textContent = 'Сохраняю...';
+    await addMeal(food, cal, p, f, c);
+    document.getElementById('modalOverlay').classList.remove('open');
+    document.getElementById('foodName').value = '';
+    document.getElementById('foodCal').value = '';
+    document.getElementById('foodP').value = '';
+    document.getElementById('foodF').value = '';
+    document.getElementById('foodC').value = '';
+    document.getElementById('submitBtn').textContent = 'Сохранить';
+  });
+}
+
+init();
+</script>
+</body>
+</html>
