@@ -654,58 +654,29 @@
     <div class="modal-title">Профиль</div>
 
     <div class="profile-row">
-      <div class="profile-row-label">Telegram ID</div>
-      <div class="profile-row-value" id="profileUserId">—</div>
+      <div class="profile-row-label">⚖️ Вес</div>
+      <div class="profile-row-value editable" id="profileWeight" onclick="editWeight()">— кг</div>
     </div>
 
     <div class="profile-row">
-      <div class="profile-row-label">Пол</div>
-      <div class="profile-row-value" id="profileGender" class="profile-row-value editable">—</div>
+      <div class="profile-row-label">🎯 Цель</div>
+      <div style="margin-top:4px">
+        <div class="goal-btns">
+          <div class="goal-btn" data-goal="lose" onclick="setGoal('lose')">📉<br>Похудеть</div>
+          <div class="goal-btn" data-goal="maintain" onclick="setGoal('maintain')">⚖️<br>Поддержать</div>
+          <div class="goal-btn" data-goal="gain" onclick="setGoal('gain')">📈<br>Набрать</div>
+        </div>
+      </div>
     </div>
 
     <div class="profile-row">
-      <div class="profile-row-label">Возраст</div>
-      <div class="profile-row-value" id="profileAge" class="profile-row-value editable">—</div>
+      <div class="profile-row-label">🔥 Норма калорий</div>
+      <div class="profile-row-value editable" id="profileCalGoal" onclick="editCalGoal()">— ккал</div>
     </div>
 
     <div class="profile-row">
-      <div class="profile-row-label">Вес</div>
-      <div class="profile-row-value" id="profileWeight" class="profile-row-value editable">—</div>
-    </div>
-
-    <div class="profile-row">
-      <div class="profile-row-label">Рост</div>
-      <div class="profile-row-value" id="profileHeight" class="profile-row-value editable">—</div>
-    </div>
-
-    <div class="profile-row">
-      <div class="profile-row-label">Активность</div>
-      <div class="profile-row-value" id="profileActivity" class="profile-row-value editable">—</div>
-    </div>
-
-    <div class="profile-row">
-      <div class="profile-row-label">Цель</div>
-      <div class="profile-row-value" id="profileGoal" class="profile-row-value editable">—</div>
-    </div>
-
-    <div class="profile-row">
-      <div class="profile-row-label">Калории</div>
-      <div class="profile-row-value" id="profileCaloriesGoal">—</div>
-    </div>
-
-    <div class="profile-row">
-      <div class="profile-row-label">Дефицит</div>
-      <div class="profile-row-value" id="profileCaloriesDeficit">—</div>
-    </div>
-
-    <div class="profile-row">
-      <div class="profile-row-label">Поддержание</div>
-      <div class="profile-row-value" id="profileCaloriesMaintenance">—</div>
-    </div>
-
-    <div class="profile-row">
-      <div class="profile-row-label">Вода</div>
-      <div class="profile-row-value" id="profileWaterGoal" class="profile-row-value editable">—</div>
+      <div class="profile-row-label">💧 Норма воды</div>
+      <div class="profile-row-value editable" id="profileWaterGoal" onclick="editWaterGoal()">— мл</div>
     </div>
 
     <button class="submit-btn" id="profileCloseBtn">Закрыть</button>
@@ -1278,25 +1249,74 @@ function setWaterInterval(n) {
 }
 
 function openProfile() {
-  if (!userSettings) {
-    alert('Профиль ещё загружается');
-    return;
-  }
-
-  document.getElementById('profileUserId').textContent = userId || '—';
-  document.getElementById('profileGender').textContent = userSettings.gender || '—';
-  document.getElementById('profileAge').textContent = userSettings.age || '—';
-  document.getElementById('profileWeight').textContent = userSettings.weight_kg ? `${userSettings.weight_kg} кг` : '—';
-  document.getElementById('profileHeight').textContent = userSettings.height_cm ? `${userSettings.height_cm} см` : '—';
-  document.getElementById('profileActivity').textContent = userSettings.activity || '—';
-  document.getElementById('profileGoal').textContent = userSettings.goal || '—';
-  document.getElementById('profileCaloriesGoal').textContent = userSettings.calories_goal ? `${userSettings.calories_goal} ккал` : '—';
-  document.getElementById('profileCaloriesDeficit').textContent = userSettings.calories_deficit ? `${userSettings.calories_deficit} ккал` : '—';
-  document.getElementById('profileCaloriesMaintenance').textContent = userSettings.calories_maintenance ? `${userSettings.calories_maintenance} ккал` : '—';
-  document.getElementById('profileWaterGoal').textContent = userSettings.water_goal_ml ? `${userSettings.water_goal_ml} мл` : '—';
-
+  if (!userSettings) return;
+  const w = userSettings.weight_kg;
+  document.getElementById('profileWeight').textContent = w ? w + ' кг' : '— кг';
+  document.getElementById('profileCalGoal').textContent = (userSettings.calories_goal || 2000) + ' ккал';
+  document.getElementById('profileWaterGoal').textContent = (userSettings.water_goal_ml || 2500) + ' мл';
+  const goal = userSettings.goal || 'maintain';
+  document.querySelectorAll('.goal-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.goal === goal);
+  });
   document.getElementById('profileModal').classList.add('open');
 }
+
+async function editWeight() {
+  const cur = userSettings?.weight_kg || '';
+  const val = prompt('Введи вес (кг):', cur);
+  if (!val) return;
+  const w = parseFloat(String(val).replace(',', '.'));
+  if (isNaN(w) || w < 30 || w > 300) { alert('Некорректный вес'); return; }
+  const { error } = await sb.from('user_settings').update({ weight_kg: w }).eq('user_id', userId);
+  if (error) { console.error('editWeight error:', error); alert('Не удалось сохранить вес'); return; }
+  userSettings.weight_kg = w;
+  document.getElementById('profileWeight').textContent = w + ' кг';
+}
+
+async function setGoal(goal) {
+  const goalMap = {
+    lose:     userSettings.calories_deficit || ((userSettings.calories_goal || 2000) - 500),
+    maintain: userSettings.calories_goal    || 2000,
+    gain:     userSettings.calories_surplus || ((userSettings.calories_goal || 2000) + 300),
+  };
+  const newCal = goalMap[goal];
+  const { error } = await sb.from('user_settings').update({ goal, calories_goal: newCal }).eq('user_id', userId);
+  if (error) { console.error('setGoal error:', error); alert('Не удалось обновить цель'); return; }
+  userSettings.goal = goal;
+  userSettings.calories_goal = newCal;
+  document.getElementById('profileCalGoal').textContent = newCal + ' ккал';
+  document.querySelectorAll('.goal-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.goal === goal);
+  });
+  await renderAll();
+}
+
+async function editCalGoal() {
+  const cur = userSettings?.calories_goal || 2000;
+  const val = prompt('Введи норму калорий:', cur);
+  if (!val) return;
+  const cal = parseInt(val, 10);
+  if (isNaN(cal) || cal < 500 || cal > 10000) { alert('Некорректное значение'); return; }
+  const { error } = await sb.from('user_settings').update({ calories_goal: cal }).eq('user_id', userId);
+  if (error) { console.error('editCalGoal error:', error); alert('Не удалось сохранить норму калорий'); return; }
+  userSettings.calories_goal = cal;
+  document.getElementById('profileCalGoal').textContent = cal + ' ккал';
+  await renderAll();
+}
+
+async function editWaterGoal() {
+  const cur = userSettings?.water_goal_ml || 2500;
+  const val = prompt('Введи норму воды (мл):', cur);
+  if (!val) return;
+  const ml = parseInt(val, 10);
+  if (isNaN(ml) || ml < 500 || ml > 10000) { alert('Некорректное значение'); return; }
+  const { error } = await sb.from('user_settings').update({ water_goal_ml: ml }).eq('user_id', userId);
+  if (error) { console.error('editWaterGoal error:', error); alert('Не удалось сохранить норму воды'); return; }
+  userSettings.water_goal_ml = ml;
+  document.getElementById('profileWaterGoal').textContent = ml + ' мл';
+  await renderAll();
+}
+
 
 async function openReminders() {
   if (!userSettings) {
