@@ -25,7 +25,8 @@ TELEGRAM_TOKEN       = os.getenv("TELEGRAM_TOKEN", "")
 OPENAI_API_KEY       = os.getenv("OPENAI_API_KEY", "")
 SUPABASE_URL         = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
-ADMIN_ID             = 446483814
+ADMIN_ID             = 6240082239
+ADMIN_IDS            = {6240082239}
 DAILY_LIMIT          = 50  # запросов в день на пользователя
 
 bot    = Bot(token=TELEGRAM_TOKEN)
@@ -56,7 +57,7 @@ def increment_request_count(user_id):
         print(f"increment error: {e}")
 
 def check_limit(user_id):
-    if user_id == ADMIN_ID:
+    if user_id in ADMIN_IDS:
         return True
     return get_request_count(user_id) < DAILY_LIMIT
 
@@ -80,7 +81,7 @@ class ChangeNotify(StatesGroup):
 # ── Доступ ────────────────────────────────────────────────────────────────────
 
 def is_admin(user_id):
-    return user_id == ADMIN_ID
+    return user_id in ADMIN_IDS
 
 def get_access_status(user_id):
     if is_admin(user_id):
@@ -397,7 +398,7 @@ async def cb_request_access(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("approve_"))
 async def cb_approve(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not is_admin(call.from_user.id):
         return
     uid = int(call.data.split("_")[1])
     set_access_status(uid, "granted")
@@ -415,7 +416,7 @@ async def cb_approve(call: CallbackQuery):
 
 @dp.callback_query(F.data.startswith("reject_"))
 async def cb_reject(call: CallbackQuery):
-    if call.from_user.id != ADMIN_ID:
+    if not is_admin(call.from_user.id):
         return
     uid = int(call.data.split("_")[1])
     set_access_status(uid, "rejected")
