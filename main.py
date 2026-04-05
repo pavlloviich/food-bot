@@ -1,8 +1,8 @@
 """
-EasyFoodTrack Bot — версия с Supabase
-- Данные хранятся в Supabase (PostgreSQL) — не теряются при перезапуске
-- GPT-4o-mini везде
-- Без Whoop
+EasyFoodTrack Bot
+- Система доступа по запросу
+- Онбординг опциональный (пропустить или заполнить)
+- GPT-4o-mini, Supabase
 """
 
 import asyncio
@@ -21,21 +21,21 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from openai import AsyncOpenAI
 from supabase import create_client, Client
 
-# ── Конфиг ────────────────────────────────────────────────────────────────────
-
-TELEGRAM_TOKEN    = os.getenv("TELEGRAM_TOKEN", "")
-OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY", "")
-SUPABASE_URL      = os.getenv("SUPABASE_URL", "")
+TELEGRAM_TOKEN       = os.getenv("TELEGRAM_TOKEN", "")
+OPENAI_API_KEY       = os.getenv("OPENAI_API_KEY", "")
+SUPABASE_URL         = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
+ADMIN_ID             = 446483814
 
 bot    = Bot(token=TELEGRAM_TOKEN)
 dp     = Dispatcher(storage=MemoryStorage())
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 sb: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
-# ── FSM ────────────────────────────────────────────────────────────────────────
+# ── FSM ───────────────────────────────────────────────────────────────────────
 
 class Setup(StatesGroup):
+    onboarding_choice = State()
     gender   = State()
     age      = State()
     weight   = State()
@@ -48,6 +48,44 @@ class Setup(StatesGroup):
 class ChangeNotify(StatesGroup):
     tz   = State()
     hour = State()
+
+# ── Доступ ────────────────────────────────────────────────────────────────────
+
+def is_admin(user_id):
+    return user_id == ADMIN_ID
+
+def get_access_status(user_id):
+    if is_admin(user_id):
+        return 'granted'
+    try:
+        r = sb.table("access_requests").select("status").eq("user_id", user_id).single().execute()
+        return r.data.get("status", "none") if r.data else "none"
+    except:
+        return "none"
+
+def request_access(user_id, username, full_name):
+    try:
+        exists = sb.table("access_requests").select("user_id").eq("user_id", user_id).execute()
+        data = {"user_id": user_id, "username": username, "full_name": full_name, "status": "pending"}
+        if exists.data:
+            sb.table("access_requests").update(data).eq("user_id", user_id).execute()
+        else:
+            sb.table("access_requests").insert(data).execute()
+    except Exception as e:
+        print(f"request_access error: {e}")
+
+def set_access_status(user_id, status):
+    try:
+        sb.table("access_requests").update({"status": status}).eq("user_id", user_id).execute()
+    except Exception as e:
+        print(f"set_access_status error: {e}")
+
+def get_all_users():
+    try:
+        r = sb.table("access_requests").select("*").execute()
+        return r.data or []
+    except:
+        return []
 
 # ── Supabase хелперы ──────────────────────────────────────────────────────────
 
@@ -68,7 +106,7 @@ def set_setting(user_id, key, value):
     except Exception as e:
         print(f"set_setting error: {e}")
 
-def set_settings_bulk(user_id, data: dict):
+def set_settings_bulk(user_id, data):
     try:
         exists = sb.table("user_settings").select("user_id").eq("user_id", user_id).execute()
         data["user_id"] = user_id
@@ -82,39 +120,28 @@ def set_settings_bulk(user_id, data: dict):
 def save_meal(user_id, food, calories, protein=0, fat=0, carbs=0):
     now = datetime.now()
     sb.table("meals").insert({
-        "user_id": user_id,
-        "date": now.strftime("%Y-%m-%d"),
-        "time": now.strftime("%H:%M"),
-        "food": food, "calories": calories,
+        "user_id": user_id, "date": now.strftime("%Y-%m-%d"),
+        "time": now.strftime("%H:%M"), "food": food, "calories": calories,
         "protein": protein, "fat": fat, "carbs": carbs
     }).execute()
 
 def save_water(user_id, ml):
     now = datetime.now()
     sb.table("water").insert({
-        "user_id": user_id,
-        "date": now.strftime("%Y-%m-%d"),
-        "time": now.strftime("%H:%M"),
-        "amount_ml": ml
+        "user_id": user_id, "date": now.strftime("%Y-%m-%d"),
+        "time": now.strftime("%H:%M"), "amount_ml": ml
     }).execute()
 
 def save_burned(user_id, calories):
     now = datetime.now()
     sb.table("burned").insert({
-        "user_id": user_id,
-        "date": now.strftime("%Y-%m-%d"),
-        "time": now.strftime("%H:%M"),
-        "calories": calories
+        "user_id": user_id, "date": now.strftime("%Y-%m-%d"),
+        "time": now.strftime("%H:%M"), "calories": calories
     }).execute()
 
 def get_today_meals(user_id):
     today = date.today().strftime("%Y-%m-%d")
     r = sb.table("meals").select("*").eq("user_id", user_id).eq("date", today).order("time").execute()
-    return r.data or []
-
-def get_period_meals(user_id, start_date, end_date):
-    r = sb.table("meals").select("*").eq("user_id", user_id)\
-        .gte("date", start_date).lte("date", end_date).order("date").order("time").execute()
     return r.data or []
 
 def get_today_water(user_id):
@@ -127,18 +154,21 @@ def get_today_burned(user_id):
     r = sb.table("burned").select("calories").eq("user_id", user_id).eq("date", today).execute()
     return sum(row["calories"] for row in (r.data or []))
 
-def delete_meal(meal_id):
-    sb.table("meals").delete().eq("id", meal_id).execute()
-
 def get_all_active_users():
     r = sb.table("user_settings").select(
         "user_id,notify_hour,timezone_offset,summary_sent_date"
     ).eq("setup_done", 1).execute()
     return r.data or []
 
-# ── Расчёт калорий ────────────────────────────────────────────────────────────
+# ── Расчёт калорий (Миффлин-Сан Жеор) ───────────────────────────────────────
 
-ACTIVITY_K = {"low": 1.2, "medium": 1.55, "high": 1.725}
+ACTIVITY_K = {
+    "sedentary":  1.2,
+    "light":      1.375,
+    "moderate":   1.55,
+    "active":     1.725,
+    "very_active": 1.9,
+}
 
 def calculate_calories(gender, age, weight_kg, height_cm, activity, goal):
     if gender == "male":
@@ -151,7 +181,7 @@ def calculate_calories(gender, age, weight_kg, height_cm, activity, goal):
     goal_cal = {"lose": deficit, "maintain": tdee, "gain": surplus}.get(goal, tdee)
     return tdee, deficit, surplus, goal_cal
 
-# ── OpenAI ─────────────────────────────────────────────────────────────────────
+# ── OpenAI ────────────────────────────────────────────────────────────────────
 
 FOOD_PROMPT = """Ты диетолог-аналитик. Ответь ТОЛЬКО в формате JSON:
 {
@@ -174,17 +204,15 @@ FOOD_PROMPT = """Ты диетолог-аналитик. Ответь ТОЛЬК
 
 async def analyze_text(text):
     resp = await client.chat.completions.create(
-        model="gpt-4o-mini",
-        response_format={"type": "json_object"},
+        model="gpt-4o-mini", response_format={"type": "json_object"},
         messages=[{"role":"system","content":FOOD_PROMPT},{"role":"user","content":text}]
     )
     return json.loads(resp.choices[0].message.content)
 
 async def analyze_image(image_bytes):
-    b64  = base64.b64encode(image_bytes).decode()
+    b64 = base64.b64encode(image_bytes).decode()
     resp = await client.chat.completions.create(
-        model="gpt-4o-mini",
-        response_format={"type": "json_object"},
+        model="gpt-4o-mini", response_format={"type": "json_object"},
         messages=[
             {"role":"system","content":FOOD_PROMPT},
             {"role":"user","content":[
@@ -203,17 +231,15 @@ async def transcribe_voice(ogg_bytes):
     os.unlink(tmp)
     return t.text
 
-# ── Форматирование ─────────────────────────────────────────────────────────────
+# ── Форматирование ────────────────────────────────────────────────────────────
 
 def water_bar(current, goal=2500):
-    pct    = min(current / goal, 1.0)
-    filled = int(pct * 10)
-    return f"{'💧'*filled}{'⬜'*(10-filled)} {current}/{goal} мл"
+    pct = min(current/goal, 1.0)
+    return f"{'💧'*int(pct*10)}{'⬜'*(10-int(pct*10))} {current}/{goal} мл"
 
 def calorie_bar(eaten, goal):
-    pct    = min(eaten / goal, 1.0)
-    filled = int(pct * 10)
-    return f"{'🟩'*filled}{'⬜'*(10-filled)} {eaten}/{goal} ккал"
+    pct = min(eaten/goal, 1.0)
+    return f"{'🟩'*int(pct*10)}{'⬜'*(10-int(pct*10))} {eaten}/{goal} ккал"
 
 def format_meal(data):
     lines = [
@@ -239,14 +265,13 @@ async def build_summary(user_id):
     total_c   = sum(m.get("carbs")   or 0 for m in meals)
 
     lines = ["📊 *Итог дня*\n"]
-
     if meals:
         lines.append("🍽 *Питание:*\n```")
         lines.append(f"{'Время':<6} {'Блюдо':<20} {'Ккал':>5}")
-        lines.append("─" * 33)
+        lines.append("─"*33)
         for m in meals:
             lines.append(f"{m['time']:<6} {m['food'][:19]:<20} {m['calories']:>5}")
-        lines.append("─" * 33)
+        lines.append("─"*33)
         lines.append(f"{'ИТОГО':<26} {total_cal:>5}\n```")
         lines.append(f"🥩 Б: *{total_p:.0f}г*  🧈 Ж: *{total_f:.0f}г*  🍞 У: *{total_c:.0f}г*\n")
     else:
@@ -261,26 +286,20 @@ async def build_summary(user_id):
         lines.append(f"💪 Сожжено: *{burned_cal} ккал*")
         lines.append(f"{emoji} Баланс: *{'−' if balance<0 else '+'}{abs(balance)} ккал*")
     lines.append("")
-
     lines.append("💧 *Вода:*")
     lines.append(water_bar(water_ml, water_goal))
     left = max(0, water_goal - water_ml)
     lines.append(f"⚠️ Осталось: *{left} мл*" if left > 0 else "✅ Норма воды выполнена!")
-
     return "\n".join(lines)
 
-# ── Клавиатуры ─────────────────────────────────────────────────────────────────
+# ── Клавиатуры ────────────────────────────────────────────────────────────────
 
 def tz_keyboard():
     zones = [
-        ("🇷🇺 Москва (UTC+3)", 3),
-        ("🇷🇺 Екатеринбург (UTC+5)", 5),
-        ("🇷🇺 Новосибирск (UTC+7)", 7),
-        ("🇷🇺 Владивосток (UTC+10)", 10),
-        ("🇹🇭 Таиланд (UTC+7)", 7),
-        ("🇦🇪 Дубай (UTC+4)", 4),
-        ("🇩🇪 Европа (UTC+2)", 2),
-        ("🇺🇸 Нью-Йорк (UTC-5)", -5),
+        ("🇷🇺 Москва (UTC+3)", 3), ("🇷🇺 Екатеринбург (UTC+5)", 5),
+        ("🇷🇺 Новосибирск (UTC+7)", 7), ("🇷🇺 Владивосток (UTC+10)", 10),
+        ("🇹🇭 Таиланд (UTC+7)", 7), ("🇦🇪 Дубай (UTC+4)", 4),
+        ("🇩🇪 Европа (UTC+2)", 2), ("🇺🇸 Нью-Йорк (UTC-5)", -5),
     ]
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=name, callback_data=f"tz_{offset}")]
@@ -292,41 +311,185 @@ def hour_keyboard():
     rows, row = [], []
     for h in hours:
         row.append(InlineKeyboardButton(text=f"{h}:00", callback_data=f"hour_{h}"))
-        if len(row) == 3:
-            rows.append(row); row = []
+        if len(row) == 3: rows.append(row); row = []
     if row: rows.append(row)
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
-# ── Онбординг ──────────────────────────────────────────────────────────────────
+# ── /start ────────────────────────────────────────────────────────────────────
 
 @dp.message(Command("start"))
 async def cmd_start(msg: Message, state: FSMContext):
-    if get_setting(msg.from_user.id, "setup_done"):
-        await msg.answer(
-            "👋 Привет!\n\n"
-            "📸 Фото / 🎤 Голос / ✍️ Текст → калории\n"
-            "💧 *'выпил стакан воды'* → вода\n"
-            "💪 *'пробежал 5км'* или */burned 300* → сожжённые калории\n\n"
-            "/today — еда за сегодня\n"
-            "/diary — дневник с удалением\n"
-            "/month — сводка за период\n"
-            "/summary — итог дня\n"
-            "/water — вода\n"
-            "/goal — изменить цель\n"
-            "/notify — время уведомлений\n"
-            "/clear — очистить дневник",
+    uid    = msg.from_user.id
+    status = get_access_status(uid)
+
+    if status == 'granted':
+        if get_setting(uid, "setup_done"):
+            await msg.answer(
+                "👋 Привет!\n\n"
+                "📸 Фото / 🎤 Голос / ✍️ Текст → калории\n"
+                "💧 *'выпил стакан воды'* → вода\n"
+                "💪 *'пробежал 5км'* или */burned 300* → сожжённые калории\n\n"
+                "/today — еда за сегодня\n"
+                "/diary — дневник с удалением\n"
+                "/month — сводка за период\n"
+                "/summary — итог дня\n"
+                "/water — вода\n"
+                "/goal — норма калорий\n"
+                "/notify — время уведомлений\n"
+                "/clear — очистить дневник\n"
+                + ("\n/users — управление пользователями" if is_admin(uid) else ""),
+                parse_mode="Markdown"
+            )
+        else:
+            await start_onboarding(msg, state)
+        return
+
+    if status == 'pending':
+        await msg.answer("⏳ Твой запрос на доступ уже отправлен. Ожидай подтверждения!")
+        return
+
+    if status == 'rejected':
+        await msg.answer("❌ Твой запрос на доступ был отклонён.")
+        return
+
+    # Новый пользователь
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔑 Запросить доступ", callback_data="request_access")]
+    ])
+    await msg.answer(
+        "👋 Привет! Это закрытый бот для подсчёта калорий.\n\n"
+        "Нажми кнопку чтобы запросить доступ:",
+        reply_markup=kb
+    )
+
+@dp.callback_query(F.data == "request_access")
+async def cb_request_access(call: CallbackQuery):
+    uid       = call.from_user.id
+    username  = call.from_user.username or ""
+    full_name = call.from_user.full_name or ""
+
+    request_access(uid, username, full_name)
+    await call.message.edit_text("✅ Запрос отправлен! Ожидай подтверждения от администратора.")
+
+    # Уведомление админу
+    display = f"@{username}" if username else full_name or str(uid)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_{uid}"),
+            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_{uid}"),
+        ]
+    ])
+    await bot.send_message(
+        ADMIN_ID,
+        f"🔔 *Новый запрос доступа*\n\n"
+        f"👤 {display}\n"
+        f"🆔 `{uid}`",
+        reply_markup=kb,
+        parse_mode="Markdown"
+    )
+
+@dp.callback_query(F.data.startswith("approve_"))
+async def cb_approve(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
+        return
+    uid = int(call.data.split("_")[1])
+    set_access_status(uid, "granted")
+    await call.message.edit_text(f"✅ Пользователь `{uid}` одобрен!", parse_mode="Markdown")
+
+    # Уведомляем пользователя
+    try:
+        await bot.send_message(
+            uid,
+            "🎉 *Доступ открыт!*\n\nДобро пожаловать! Напиши /start чтобы начать.",
             parse_mode="Markdown"
         )
+    except:
+        pass
+
+@dp.callback_query(F.data.startswith("reject_"))
+async def cb_reject(call: CallbackQuery):
+    if call.from_user.id != ADMIN_ID:
         return
+    uid = int(call.data.split("_")[1])
+    set_access_status(uid, "rejected")
+    await call.message.edit_text(f"❌ Пользователь `{uid}` отклонён.", parse_mode="Markdown")
+    try:
+        await bot.send_message(uid, "❌ Твой запрос на доступ был отклонён.")
+    except:
+        pass
+
+# ── /users — управление пользователями (только для админа) ───────────────────
+
+@dp.message(Command("users"))
+async def cmd_users(msg: Message):
+    if not is_admin(msg.from_user.id):
+        return
+    users = get_all_users()
+    if not users:
+        await msg.answer("📭 Нет запросов доступа.")
+        return
+
+    status_emoji = {"granted": "✅", "pending": "⏳", "rejected": "❌"}
+    lines = ["👥 *Пользователи:*\n"]
+    for u in users:
+        display = f"@{u['username']}" if u.get('username') else u.get('full_name') or str(u['user_id'])
+        emoji   = status_emoji.get(u['status'], "❓")
+        lines.append(f"{emoji} {display} `{u['user_id']}`")
+
+    buttons = []
+    for u in users:
+        display = f"@{u['username']}" if u.get('username') else str(u['user_id'])
+        if u['status'] == 'granted':
+            buttons.append([InlineKeyboardButton(text=f"🚫 Заблокировать {display}", callback_data=f"reject_{u['user_id']}")])
+        elif u['status'] in ('pending', 'rejected'):
+            buttons.append([
+                InlineKeyboardButton(text=f"✅ {display}", callback_data=f"approve_{u['user_id']}"),
+                InlineKeyboardButton(text=f"❌ {display}", callback_data=f"reject_{u['user_id']}"),
+            ])
+
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons) if buttons else None
+    await msg.answer("\n".join(lines), reply_markup=kb, parse_mode="Markdown")
+
+# ── Онбординг ─────────────────────────────────────────────────────────────────
+
+async def start_onboarding(msg, state):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📝 Заполнить профиль (точнее)", callback_data="ob_full")],
+        [InlineKeyboardButton(text="⚡ Пропустить (настрою вручную)", callback_data="ob_skip")],
+    ])
+    await msg.answer(
+        "🎉 *Добро пожаловать!*\n\n"
+        "Хочешь заполнить профиль чтобы я рассчитал твою норму калорий?\n\n"
+        "Или можешь пропустить и настроить норму вручную через /goal",
+        reply_markup=kb,
+        parse_mode="Markdown"
+    )
+    await state.set_state(Setup.onboarding_choice)
+
+@dp.callback_query(Setup.onboarding_choice, F.data == "ob_skip")
+async def ob_skip(call: CallbackQuery, state: FSMContext):
+    uid = call.from_user.id
+    set_settings_bulk(uid, {
+        "calories_goal": 2000, "calories_deficit": 1500,
+        "calories_surplus": 2300, "water_goal_ml": 2500,
+        "timezone_offset": 0, "notify_hour": 21, "setup_done": 1,
+        "goal": "maintain",
+    })
+    await state.clear()
+    await call.message.edit_text(
+        "✅ *Готово!* Норма по умолчанию: *2000 ккал/день*\n\n"
+        "Измени через /goal в любой момент.\n\n"
+        "Отправляй фото еды, голосовые или текст — считаю калории! 🚀",
+        parse_mode="Markdown"
+    )
+
+@dp.callback_query(Setup.onboarding_choice, F.data == "ob_full")
+async def ob_full(call: CallbackQuery, state: FSMContext):
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="👨 Мужской", callback_data="gender_male"),
          InlineKeyboardButton(text="👩 Женский",  callback_data="gender_female")]
     ])
-    await msg.answer(
-        "👋 Привет! Я твой health-трекер.\n\n"
-        "Давай рассчитаем твою норму калорий. Укажи пол:",
-        reply_markup=kb
-    )
+    await call.message.edit_text("Укажи пол:", reply_markup=kb)
     await state.set_state(Setup.gender)
 
 @dp.callback_query(Setup.gender, F.data.startswith("gender_"))
@@ -364,9 +527,11 @@ async def setup_height(msg: Message, state: FSMContext):
         assert 100 < h < 250
         await state.update_data(height_cm=h)
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🛋 Низкая (сидячая работа)",        callback_data="act_low")],
-            [InlineKeyboardButton(text="🚶 Средняя (3-5 тренировок/нед)",  callback_data="act_medium")],
-            [InlineKeyboardButton(text="🏃 Высокая (6-7 тренировок/нед)",  callback_data="act_high")],
+            [InlineKeyboardButton(text="🛋 Сидячая работа, почти нет спорта",      callback_data="act_sedentary")],
+            [InlineKeyboardButton(text="🚶 Лёгкая активность (1-2 тренировки/нед)", callback_data="act_light")],
+            [InlineKeyboardButton(text="🏃 Умеренная (3-5 тренировок/нед)",         callback_data="act_moderate")],
+            [InlineKeyboardButton(text="💪 Высокая (6-7 тренировок/нед)",            callback_data="act_active")],
+            [InlineKeyboardButton(text="🔥 Очень высокая (спорт + физ. работа)",    callback_data="act_very_active")],
         ])
         await msg.answer("Уровень физической активности:", reply_markup=kb)
         await state.set_state(Setup.activity)
@@ -375,7 +540,7 @@ async def setup_height(msg: Message, state: FSMContext):
 
 @dp.callback_query(Setup.activity, F.data.startswith("act_"))
 async def setup_activity(call: CallbackQuery, state: FSMContext):
-    await state.update_data(activity=call.data.split("_")[1])
+    await state.update_data(activity=call.data[4:])
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📉 Похудеть",       callback_data="goal_lose")],
         [InlineKeyboardButton(text="⚖️ Поддержать вес", callback_data="goal_maintain")],
@@ -435,15 +600,15 @@ async def setup_hour(call: CallbackQuery, state: FSMContext):
         f"🔔 Сводка каждый день в *{hour}:00* (UTC{'+' if tz>=0 else ''}{tz})\n\n"
         f"Отправляй фото еды, голосовые или текст!\n"
         f"💧 'выпил стакан воды' — вода\n"
-        f"💪 'пробежал 5км' — сожжённые калории\n\n"
-        f"/summary — итог дня",
+        f"💪 'пробежал 5км' — сожжённые калории",
         parse_mode="Markdown"
     )
 
-# ── /notify ────────────────────────────────────────────────────────────────────
+# ── /notify ───────────────────────────────────────────────────────────────────
 
 @dp.message(Command("notify"))
 async def cmd_notify(msg: Message, state: FSMContext):
+    if get_access_status(msg.from_user.id) != 'granted': return
     cur_h  = get_setting(msg.from_user.id, "notify_hour") or 21
     cur_tz = get_setting(msg.from_user.id, "timezone_offset") or 0
     await msg.answer(
@@ -473,10 +638,11 @@ async def change_hour(call: CallbackQuery, state: FSMContext):
         parse_mode="Markdown"
     )
 
-# ── /goal ──────────────────────────────────────────────────────────────────────
+# ── /goal ─────────────────────────────────────────────────────────────────────
 
 @dp.message(Command("goal"))
 async def cmd_goal(msg: Message, state: FSMContext):
+    if get_access_status(msg.from_user.id) != 'granted': return
     uid     = msg.from_user.id
     tdee    = get_setting(uid, "calories_goal")    or 2000
     deficit = get_setting(uid, "calories_deficit") or tdee - 500
@@ -485,7 +651,8 @@ async def cmd_goal(msg: Message, state: FSMContext):
         [InlineKeyboardButton(text=f"📉 Похудеть ({deficit} ккал/день)",      callback_data="setgoal_lose")],
         [InlineKeyboardButton(text=f"⚖️ Поддержать вес ({tdee} ккал/день)",   callback_data="setgoal_maintain")],
         [InlineKeyboardButton(text=f"📈 Набрать массу ({surplus} ккал/день)", callback_data="setgoal_gain")],
-        [InlineKeyboardButton(text="🔄 Пересчитать",                           callback_data="setgoal_recalc")],
+        [InlineKeyboardButton(text="✏️ Ввести свою норму",                     callback_data="setgoal_custom")],
+        [InlineKeyboardButton(text="🔄 Пересчитать профиль",                   callback_data="setgoal_recalc")],
     ])
     await msg.answer("🎯 Выбери цель:", reply_markup=kb)
 
@@ -494,12 +661,19 @@ async def cb_setgoal(call: CallbackQuery, state: FSMContext):
     action = call.data.split("_")[1]
     uid    = call.from_user.id
     if action == "recalc":
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="👨 Мужской", callback_data="gender_male"),
-             InlineKeyboardButton(text="👩 Женский",  callback_data="gender_female")]
-        ])
-        await call.message.edit_text("Пересчитаем! Укажи пол:", reply_markup=kb)
+        await call.message.edit_text(
+            "Пересчитаем! Выбери пол:",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="👨 Мужской", callback_data="gender_male"),
+                 InlineKeyboardButton(text="👩 Женский",  callback_data="gender_female")]
+            ])
+        )
         await state.set_state(Setup.gender)
+        return
+    if action == "custom":
+        await call.message.edit_text("Введи свою норму калорий числом, например: 1800")
+        await state.set_state(None)
+        await state.update_data(awaiting_custom_goal=True)
         return
     goal_map = {
         "lose":     get_setting(uid, "calories_deficit") or 1500,
@@ -514,114 +688,11 @@ async def cb_setgoal(call: CallbackQuery, state: FSMContext):
         parse_mode="Markdown"
     )
 
-# ── /diary — дневник с удалением ──────────────────────────────────────────────
-
-@dp.message(Command("diary"))
-async def cmd_diary(msg: Message):
-    meals = get_today_meals(msg.from_user.id)
-    if not meals:
-        await msg.answer("📭 Сегодня записей нет.")
-        return
-    await msg.answer("📋 *Дневник за сегодня*\nНажми ❌ чтобы удалить запись:", parse_mode="Markdown")
-    for m in meals:
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="❌ Удалить", callback_data=f"del_{m['id']}")]
-        ])
-        await msg.answer(
-            f"🕐 {m['time']} — *{m['food']}*\n🔥 {m['calories']} ккал",
-            reply_markup=kb, parse_mode="Markdown"
-        )
-
-@dp.callback_query(F.data.startswith("del_"))
-async def cb_delete_meal(call: CallbackQuery):
-    meal_id = int(call.data.split("_")[1])
-    delete_meal(meal_id)
-    await call.message.edit_text("🗑 Запись удалена.")
-
-# ── /month — сводка за период ─────────────────────────────────────────────────
-
-@dp.message(Command("month"))
-async def cmd_month(msg: Message):
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📅 Сегодня",    callback_data="period_today")],
-        [InlineKeyboardButton(text="📅 7 дней",     callback_data="period_7")],
-        [InlineKeyboardButton(text="📅 30 дней",    callback_data="period_30")],
-    ])
-    await msg.answer("За какой период показать статистику?", reply_markup=kb)
-
-@dp.callback_query(F.data.startswith("period_"))
-async def cb_period(call: CallbackQuery):
-    period = call.data.split("_")[1]
-    today  = date.today()
-
-    if period == "today":
-        start = today
-    elif period == "7":
-        from datetime import timedelta
-        start = today - timedelta(days=6)
-    else:
-        from datetime import timedelta
-        start = today - timedelta(days=29)
-
-    meals = get_period_meals(
-        call.from_user.id,
-        start.strftime("%Y-%m-%d"),
-        today.strftime("%Y-%m-%d")
-    )
-
-    if not meals:
-        await call.message.edit_text("📭 Нет данных за этот период.")
-        return
-
-    # Группируем по дням
-    by_day = {}
-    for m in meals:
-        d = m["date"]
-        if d not in by_day:
-            by_day[d] = []
-        by_day[d].append(m)
-
-    lines = [f"📊 *Статистика за {len(by_day)} дней*\n```"]
-    lines.append(f"{'Дата':<10} {'Ккал':>6} {'Б':>5} {'Ж':>5} {'У':>5}")
-    lines.append("─" * 35)
-
-    total_cal_all = 0
-    for day, day_meals in sorted(by_day.items()):
-        cal = sum(m["calories"] for m in day_meals)
-        p   = sum(m.get("protein") or 0 for m in day_meals)
-        f   = sum(m.get("fat")     or 0 for m in day_meals)
-        c   = sum(m.get("carbs")   or 0 for m in day_meals)
-        total_cal_all += cal
-        # Форматируем дату покороче
-        d_short = day[5:]  # MM-DD
-        lines.append(f"{d_short:<10} {cal:>6} {p:>5.0f} {f:>5.0f} {c:>5.0f}")
-
-    lines.append("─" * 35)
-    avg = total_cal_all // len(by_day)
-    lines.append(f"{'Среднее':<10} {avg:>6}")
-    lines.append("```")
-
-    await call.message.edit_text("\n".join(lines), parse_mode="Markdown")
-
-# ── /burned ────────────────────────────────────────────────────────────────────
-
-@dp.message(Command("burned"))
-async def cmd_burned(msg: Message):
-    try:
-        cal = int(msg.text.split()[1])
-        save_burned(msg.from_user.id, cal)
-        total = get_today_burned(msg.from_user.id)
-        await msg.answer(
-            f"💪 +*{cal} ккал* сожжено!\nВсего сегодня: *{total} ккал*",
-            parse_mode="Markdown"
-        )
-    except:
-        await msg.answer("Используй так: /burned 300")
-
-# ── Основные команды ───────────────────────────────────────────────────────────
+# ── Основные команды ──────────────────────────────────────────────────────────
 
 @dp.message(Command("today"))
 async def cmd_today(msg: Message):
+    if get_access_status(msg.from_user.id) != 'granted': return
     meals = get_today_meals(msg.from_user.id)
     if not meals:
         await msg.answer("📭 Сегодня записей нет.")
@@ -636,27 +707,105 @@ async def cmd_today(msg: Message):
 
 @dp.message(Command("summary"))
 async def cmd_summary(msg: Message):
+    if get_access_status(msg.from_user.id) != 'granted': return
     wait = await msg.answer("📊 Собираю итог...")
     await wait.edit_text(await build_summary(msg.from_user.id), parse_mode="Markdown")
 
 @dp.message(Command("water"))
 async def cmd_water(msg: Message):
+    if get_access_status(msg.from_user.id) != 'granted': return
     water = get_today_water(msg.from_user.id)
     goal  = get_setting(msg.from_user.id, "water_goal_ml") or 2500
     await msg.answer(f"💧 *Вода за сегодня*\n\n{water_bar(water, goal)}", parse_mode="Markdown")
 
+@dp.message(Command("diary"))
+async def cmd_diary(msg: Message):
+    if get_access_status(msg.from_user.id) != 'granted': return
+    meals = get_today_meals(msg.from_user.id)
+    if not meals:
+        await msg.answer("📭 Сегодня записей нет.")
+        return
+    await msg.answer("📋 *Дневник за сегодня*\nНажми ❌ чтобы удалить:", parse_mode="Markdown")
+    for m in meals:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Удалить", callback_data=f"del_{m['id']}")]
+        ])
+        await msg.answer(
+            f"🕐 {m['time']} — *{m['food']}*\n🔥 {m['calories']} ккал",
+            reply_markup=kb, parse_mode="Markdown"
+        )
+
+@dp.callback_query(F.data.startswith("del_"))
+async def cb_delete_meal(call: CallbackQuery):
+    meal_id = int(call.data.split("_")[1])
+    sb.table("meals").delete().eq("id", meal_id).execute()
+    await call.message.edit_text("🗑 Запись удалена.")
+
+@dp.message(Command("month"))
+async def cmd_month(msg: Message):
+    if get_access_status(msg.from_user.id) != 'granted': return
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📅 Сегодня", callback_data="period_today")],
+        [InlineKeyboardButton(text="📅 7 дней",  callback_data="period_7")],
+        [InlineKeyboardButton(text="📅 30 дней", callback_data="period_30")],
+    ])
+    await msg.answer("За какой период показать статистику?", reply_markup=kb)
+
+@dp.callback_query(F.data.startswith("period_"))
+async def cb_period(call: CallbackQuery):
+    from datetime import timedelta
+    period = call.data.split("_")[1]
+    t      = date.today()
+    start  = t if period=="today" else t-timedelta(days=6 if period=="7" else 29)
+    r = sb.table("meals").select("*").eq("user_id", call.from_user.id)\
+        .gte("date", start.strftime("%Y-%m-%d")).lte("date", t.strftime("%Y-%m-%d"))\
+        .order("date").execute()
+    meals = r.data or []
+    if not meals:
+        await call.message.edit_text("📭 Нет данных за этот период.")
+        return
+    by_day = {}
+    for m in meals:
+        by_day.setdefault(m["date"], []).append(m)
+    lines = [f"📊 *Статистика за {len(by_day)} дней*\n```"]
+    lines.append(f"{'Дата':<8} {'Ккал':>6} {'Б':>5} {'Ж':>5} {'У':>5}")
+    lines.append("─"*33)
+    total_all = 0
+    for day, dm in sorted(by_day.items()):
+        cal = sum(m["calories"] for m in dm)
+        p   = sum(m.get("protein") or 0 for m in dm)
+        f   = sum(m.get("fat") or 0 for m in dm)
+        c   = sum(m.get("carbs") or 0 for m in dm)
+        total_all += cal
+        lines.append(f"{day[5:]:<8} {cal:>6} {p:>5.0f} {f:>5.0f} {c:>5.0f}")
+    lines += ["─"*33, f"{'Среднее':<8} {total_all//len(by_day):>6}", "```"]
+    await call.message.edit_text("\n".join(lines), parse_mode="Markdown")
+
+@dp.message(Command("burned"))
+async def cmd_burned(msg: Message):
+    if get_access_status(msg.from_user.id) != 'granted': return
+    try:
+        cal = int(msg.text.split()[1])
+        save_burned(msg.from_user.id, cal)
+        total = get_today_burned(msg.from_user.id)
+        await msg.answer(f"💪 +*{cal} ккал* сожжено!\nВсего сегодня: *{total} ккал*", parse_mode="Markdown")
+    except:
+        await msg.answer("Используй так: /burned 300")
+
 @dp.message(Command("clear"))
 async def cmd_clear(msg: Message):
+    if get_access_status(msg.from_user.id) != 'granted': return
     today = date.today().strftime("%Y-%m-%d")
     sb.table("meals").delete().eq("user_id", msg.from_user.id).eq("date", today).execute()
     sb.table("water").delete().eq("user_id", msg.from_user.id).eq("date", today).execute()
     sb.table("burned").delete().eq("user_id", msg.from_user.id).eq("date", today).execute()
     await msg.answer("🗑 Дневник за сегодня очищен.")
 
-# ── Обработка сообщений ────────────────────────────────────────────────────────
+# ── Обработка сообщений ───────────────────────────────────────────────────────
 
 @dp.message(F.photo)
 async def handle_photo(msg: Message):
+    if get_access_status(msg.from_user.id) != 'granted': return
     wait = await msg.answer("🔍 Анализирую фото...")
     try:
         file = await bot.get_file(msg.photo[-1].file_id)
@@ -675,6 +824,7 @@ async def handle_photo(msg: Message):
 
 @dp.message(F.voice)
 async def handle_voice(msg: Message):
+    if get_access_status(msg.from_user.id) != 'granted': return
     wait = await msg.answer("🎙 Распознаю...")
     try:
         file = await bot.get_file(msg.voice.file_id)
@@ -690,6 +840,7 @@ async def handle_voice(msg: Message):
 
 @dp.message(F.text & ~F.text.startswith("/"))
 async def handle_text(msg: Message):
+    if get_access_status(msg.from_user.id) != 'granted': return
     wait = await msg.answer("🔍 Анализирую...")
     await process_input(msg.from_user.id, msg.text, wait)
 
@@ -701,31 +852,22 @@ async def process_input(user_id, text, wait_msg):
             save_water(user_id, ml)
             total = get_today_water(user_id)
             goal  = get_setting(user_id, "water_goal_ml") or 2500
-            await wait_msg.edit_text(
-                f"💧 +*{ml} мл* воды!\n\n{water_bar(total, goal)}",
-                parse_mode="Markdown"
-            )
+            await wait_msg.edit_text(f"💧 +*{ml} мл* воды!\n\n{water_bar(total,goal)}", parse_mode="Markdown")
         elif data.get("is_burned"):
             cal   = data.get("burned_calories") or 0
             save_burned(user_id, cal)
             total = get_today_burned(user_id)
-            await wait_msg.edit_text(
-                f"💪 +*{cal} ккал* сожжено!\nВсего сегодня: *{total} ккал*",
-                parse_mode="Markdown"
-            )
+            await wait_msg.edit_text(f"💪 +*{cal} ккал* сожжено!\nВсего сегодня: *{total} ккал*", parse_mode="Markdown")
         else:
             save_meal(user_id, data["food"], data["calories"],
                       data.get("protein",0), data.get("fat",0), data.get("carbs",0))
             total = sum(m["calories"] for m in get_today_meals(user_id))
             goal  = get_setting(user_id, "calories_goal") or 2000
-            await wait_msg.edit_text(
-                format_meal(data)+f"\n\n{calorie_bar(total, goal)}",
-                parse_mode="Markdown"
-            )
+            await wait_msg.edit_text(format_meal(data)+f"\n\n{calorie_bar(total,goal)}", parse_mode="Markdown")
     except Exception as e:
         await wait_msg.edit_text(f"❌ Ошибка: {e}")
 
-# ── Автосводка ─────────────────────────────────────────────────────────────────
+# ── Автосводка ────────────────────────────────────────────────────────────────
 
 async def auto_summary_task():
     while True:
@@ -743,10 +885,10 @@ async def auto_summary_task():
                     except:
                         pass
 
-# ── Запуск ─────────────────────────────────────────────────────────────────────
+# ── Запуск ────────────────────────────────────────────────────────────────────
 
 async def main():
-    print("Бот запущен с Supabase!")
+    print("Бот запущен!")
     asyncio.create_task(auto_summary_task())
     await dp.start_polling(bot)
 
