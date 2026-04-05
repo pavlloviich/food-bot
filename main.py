@@ -132,13 +132,6 @@ def save_water(user_id, ml):
         "time": now.strftime("%H:%M"), "amount_ml": ml
     }).execute()
 
-def save_burned(user_id, calories):
-    now = datetime.now()
-    sb.table("burned").insert({
-        "user_id": user_id, "date": now.strftime("%Y-%m-%d"),
-        "time": now.strftime("%H:%M"), "calories": calories
-    }).execute()
-
 def get_today_meals(user_id):
     today = date.today().strftime("%Y-%m-%d")
     r = sb.table("meals").select("*").eq("user_id", user_id).eq("date", today).order("time").execute()
@@ -148,11 +141,6 @@ def get_today_water(user_id):
     today = date.today().strftime("%Y-%m-%d")
     r = sb.table("water").select("amount_ml").eq("user_id", user_id).eq("date", today).execute()
     return sum(row["amount_ml"] for row in (r.data or []))
-
-def get_today_burned(user_id):
-    today = date.today().strftime("%Y-%m-%d")
-    r = sb.table("burned").select("calories").eq("user_id", user_id).eq("date", today).execute()
-    return sum(row["calories"] for row in (r.data or []))
 
 def get_all_active_users():
     r = sb.table("user_settings").select(
@@ -187,19 +175,16 @@ FOOD_PROMPT = """Ты диетолог-аналитик. Ответь ТОЛЬК
 {
   "is_food": true,
   "is_water": false,
-  "is_burned": false,
   "food": "название",
   "weight_g": 100,
   "calories": 200,
   "protein": 10,
   "fat": 5,
   "carbs": 20,
-  "burned_calories": 0,
   "water_ml": 0,
   "comment": ""
 }
 Если это вода/жидкость без калорий — is_water: true, water_ml: количество мл.
-Если это сожжённые калории (тренировка) — is_burned: true, burned_calories: количество.
 Делай разумную оценку порции если вес не указан."""
 
 async def analyze_text(text):
@@ -254,7 +239,6 @@ def format_meal(data):
 async def build_summary(user_id):
     meals      = get_today_meals(user_id)
     water_ml   = get_today_water(user_id)
-    burned_cal = get_today_burned(user_id)
     cal_goal   = get_setting(user_id, "calories_goal") or 2000
     water_goal = get_setting(user_id, "water_goal_ml") or 2500
     goal_type  = get_setting(user_id, "goal") or "maintain"
@@ -280,11 +264,6 @@ async def build_summary(user_id):
     goal_labels = {"lose":"похудение 📉","maintain":"поддержание ⚖️","gain":"набор массы 📈"}
     lines.append(f"⚡ *Калорийный баланс* ({goal_labels.get(goal_type,'')})")
     lines.append(calorie_bar(total_cal, cal_goal))
-    if burned_cal:
-        balance = burned_cal - total_cal
-        emoji   = "✅" if balance > 0 else "⚠️"
-        lines.append(f"💪 Сожжено: *{burned_cal} ккал*")
-        lines.append(f"{emoji} Баланс: *{'−' if balance<0 else '+'}{abs(balance)} ккал*")
     lines.append("")
     lines.append("💧 *Вода:*")
     lines.append(water_bar(water_ml, water_goal))
@@ -328,7 +307,7 @@ async def cmd_start(msg: Message, state: FSMContext):
                 "👋 Привет!\n\n"
                 "📸 Фото / 🎤 Голос / ✍️ Текст → калории\n"
                 "💧 *'выпил стакан воды'* → вода\n"
-                "💪 *'пробежал 5км'* или */burned 300* → сожжённые калории\n\n"
+                "\n"
                 "/today — еда за сегодня\n"
                 "/diary — дневник с удалением\n"
                 "/month — сводка за период\n"
@@ -600,7 +579,6 @@ async def setup_hour(call: CallbackQuery, state: FSMContext):
         f"🔔 Сводка каждый день в *{hour}:00* (UTC{'+' if tz>=0 else ''}{tz})\n\n"
         f"Отправляй фото еды, голосовые или текст!\n"
         f"💧 'выпил стакан воды' — вода\n"
-        f"💪 'пробежал 5км' — сожжённые калории",
         parse_mode="Markdown"
     )
 
@@ -781,24 +759,12 @@ async def cb_period(call: CallbackQuery):
     lines += ["─"*33, f"{'Среднее':<8} {total_all//len(by_day):>6}", "```"]
     await call.message.edit_text("\n".join(lines), parse_mode="Markdown")
 
-@dp.message(Command("burned"))
-async def cmd_burned(msg: Message):
-    if get_access_status(msg.from_user.id) != 'granted': return
-    try:
-        cal = int(msg.text.split()[1])
-        save_burned(msg.from_user.id, cal)
-        total = get_today_burned(msg.from_user.id)
-        await msg.answer(f"💪 +*{cal} ккал* сожжено!\nВсего сегодня: *{total} ккал*", parse_mode="Markdown")
-    except:
-        await msg.answer("Используй так: /burned 300")
-
 @dp.message(Command("clear"))
 async def cmd_clear(msg: Message):
     if get_access_status(msg.from_user.id) != 'granted': return
     today = date.today().strftime("%Y-%m-%d")
     sb.table("meals").delete().eq("user_id", msg.from_user.id).eq("date", today).execute()
     sb.table("water").delete().eq("user_id", msg.from_user.id).eq("date", today).execute()
-    sb.table("burned").delete().eq("user_id", msg.from_user.id).eq("date", today).execute()
     await msg.answer("🗑 Дневник за сегодня очищен.")
 
 # ── Обработка сообщений ───────────────────────────────────────────────────────
@@ -853,11 +819,6 @@ async def process_input(user_id, text, wait_msg):
             total = get_today_water(user_id)
             goal  = get_setting(user_id, "water_goal_ml") or 2500
             await wait_msg.edit_text(f"💧 +*{ml} мл* воды!\n\n{water_bar(total,goal)}", parse_mode="Markdown")
-        elif data.get("is_burned"):
-            cal   = data.get("burned_calories") or 0
-            save_burned(user_id, cal)
-            total = get_today_burned(user_id)
-            await wait_msg.edit_text(f"💪 +*{cal} ккал* сожжено!\nВсего сегодня: *{total} ккал*", parse_mode="Markdown")
         else:
             save_meal(user_id, data["food"], data["calories"],
                       data.get("protein",0), data.get("fat",0), data.get("carbs",0))
