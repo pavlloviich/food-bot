@@ -1,4 +1,3 @@
 aiogram
-openai
+google-generativeai
 aiohttp
-aiosqlite
