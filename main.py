@@ -26,11 +26,39 @@ OPENAI_API_KEY       = os.getenv("OPENAI_API_KEY", "")
 SUPABASE_URL         = os.getenv("SUPABASE_URL", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 ADMIN_ID             = 446483814
+DAILY_LIMIT          = 50  # запросов в день на пользователя
 
 bot    = Bot(token=TELEGRAM_TOKEN)
 dp     = Dispatcher(storage=MemoryStorage())
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
 sb: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
+
+# ── Лимит запросов ────────────────────────────────────────────────────────────
+
+def get_request_count(user_id):
+    today = date.today().strftime("%Y-%m-%d")
+    try:
+        r = sb.table("request_counts").select("count").eq("user_id", user_id).eq("date", today).execute()
+        return r.data[0].get("count", 0) if r.data else 0
+    except:
+        return 0
+
+def increment_request_count(user_id):
+    today = date.today().strftime("%Y-%m-%d")
+    try:
+        exists = sb.table("request_counts").select("count").eq("user_id", user_id).eq("date", today).execute()
+        if exists.data:
+            current = exists.data[0].get("count", 0)
+            sb.table("request_counts").update({"count": current + 1}).eq("user_id", user_id).eq("date", today).execute()
+        else:
+            sb.table("request_counts").insert({"user_id": user_id, "date": today, "count": 1}).execute()
+    except Exception as e:
+        print(f"increment error: {e}")
+
+def check_limit(user_id):
+    if user_id == ADMIN_ID:
+        return True
+    return get_request_count(user_id) < DAILY_LIMIT
 
 # ── FSM ───────────────────────────────────────────────────────────────────────
 
@@ -772,6 +800,11 @@ async def cmd_clear(msg: Message):
 @dp.message(F.photo)
 async def handle_photo(msg: Message):
     if get_access_status(msg.from_user.id) != 'granted': return
+    if not check_limit(msg.from_user.id):
+        remaining = DAILY_LIMIT - get_request_count(msg.from_user.id)
+        await msg.answer(f"⚠️ Дневной лимит {DAILY_LIMIT} запросов исчерпан. Приходи завтра!")
+        return
+    increment_request_count(msg.from_user.id)
     wait = await msg.answer("🔍 Анализирую фото...")
     try:
         file = await bot.get_file(msg.photo[-1].file_id)
@@ -791,6 +824,10 @@ async def handle_photo(msg: Message):
 @dp.message(F.voice)
 async def handle_voice(msg: Message):
     if get_access_status(msg.from_user.id) != 'granted': return
+    if not check_limit(msg.from_user.id):
+        await msg.answer(f"⚠️ Дневной лимит {DAILY_LIMIT} запросов исчерпан. Приходи завтра!")
+        return
+    increment_request_count(msg.from_user.id)
     wait = await msg.answer("🎙 Распознаю...")
     try:
         file = await bot.get_file(msg.voice.file_id)
@@ -807,6 +844,10 @@ async def handle_voice(msg: Message):
 @dp.message(F.text & ~F.text.startswith("/"))
 async def handle_text(msg: Message):
     if get_access_status(msg.from_user.id) != 'granted': return
+    if not check_limit(msg.from_user.id):
+        await msg.answer(f"⚠️ Дневной лимит {DAILY_LIMIT} запросов исчерпан. Приходи завтра!")
+        return
+    increment_request_count(msg.from_user.id)
     wait = await msg.answer("🔍 Анализирую...")
     await process_input(msg.from_user.id, msg.text, wait)
 
