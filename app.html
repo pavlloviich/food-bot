@@ -32,7 +32,6 @@
     overflow-x: hidden;
   }
 
-  /* ── Header ── */
   .header {
     padding: 20px 20px 0;
     position: sticky;
@@ -58,12 +57,8 @@
     -webkit-text-fill-color: transparent;
   }
 
-  .date-label {
-    font-size: 13px;
-    color: var(--muted);
-  }
+  .date-label { font-size: 13px; color: var(--muted); }
 
-  /* ── Period tabs ── */
   .period-tabs {
     display: flex;
     gap: 8px;
@@ -92,7 +87,6 @@
     font-weight: 700;
   }
 
-  /* ── Summary cards ── */
   .summary-row {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -132,10 +126,7 @@
     color: var(--text);
   }
 
-  .card-unit {
-    font-size: 11px;
-    color: var(--muted);
-  }
+  .card-unit { font-size: 11px; color: var(--muted); }
 
   .card-bar {
     height: 3px;
@@ -152,7 +143,31 @@
     transition: width 0.5s ease;
   }
 
-  /* ── Meal list ── */
+  /* ── Tabs (Еда / Вода) ── */
+  .section-tabs {
+    display: flex;
+    gap: 0;
+    padding: 0 20px 16px;
+  }
+
+  .section-tab {
+    flex: 1;
+    padding: 10px;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    border-bottom: 2px solid var(--border);
+    color: var(--muted);
+    transition: all 0.2s;
+  }
+
+  .section-tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+    font-weight: 700;
+  }
+
   .section-header {
     display: flex;
     align-items: center;
@@ -227,10 +242,7 @@
     margin-bottom: 2px;
   }
 
-  .meal-meta {
-    font-size: 12px;
-    color: var(--muted);
-  }
+  .meal-meta { font-size: 12px; color: var(--muted); }
 
   .meal-cal {
     font-family: 'Syne', sans-serif;
@@ -240,7 +252,13 @@
     flex-shrink: 0;
   }
 
-  .meal-delete {
+  .meal-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .icon-btn {
     width: 30px;
     height: 30px;
     border-radius: 50%;
@@ -251,17 +269,46 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 14px;
-    flex-shrink: 0;
+    font-size: 13px;
     transition: all 0.2s;
   }
-  .meal-delete:active {
-    background: var(--danger);
-    border-color: var(--danger);
-    color: white;
+
+  .icon-btn:active { transform: scale(0.9); }
+  .icon-btn.edit:active { background: var(--accent2); border-color: var(--accent2); color: #000; }
+  .icon-btn.del:active  { background: var(--danger);  border-color: var(--danger);  color: white; }
+
+  /* ── Water list ── */
+  .water-entry {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    animation: slideIn 0.3s ease;
   }
 
-  /* ── Day groups (for week/month) ── */
+  .water-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    background: rgba(78, 240, 255, 0.1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+
+  .water-info { flex: 1; }
+  .water-ml {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--accent2);
+  }
+
   .day-group { margin-bottom: 20px; }
 
   .day-header {
@@ -278,13 +325,8 @@
     color: var(--muted);
   }
 
-  .day-total {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--accent);
-  }
+  .day-total { font-size: 13px; font-weight: 500; color: var(--accent); }
 
-  /* ── Empty state ── */
   .empty {
     padding: 60px 20px;
     text-align: center;
@@ -313,10 +355,7 @@
     pointer-events: none;
     transition: opacity 0.3s;
   }
-  .modal-overlay.open {
-    opacity: 1;
-    pointer-events: all;
-  }
+  .modal-overlay.open { opacity: 1; pointer-events: all; }
 
   .modal {
     background: var(--surface);
@@ -378,7 +417,6 @@
     font-family: 'Syne', sans-serif;
   }
 
-  /* ── Loading ── */
   .loading {
     display: flex;
     flex-direction: column;
@@ -419,17 +457,23 @@
 
 <div id="summaryRow" class="summary-row"></div>
 
+<div class="section-tabs">
+  <div class="section-tab active" data-section="meals">🍽 Еда</div>
+  <div class="section-tab" data-section="water">💧 Вода</div>
+</div>
+
 <div class="section-header">
-  <div class="section-title">Дневник</div>
+  <div class="section-title" id="sectionTitle">Дневник</div>
   <button class="add-btn" id="addBtn">+ Добавить</button>
 </div>
 
 <div id="content" class="pb"></div>
 
-<!-- Add meal modal -->
-<div class="modal-overlay" id="modalOverlay">
+<!-- Meal modal -->
+<div class="modal-overlay" id="mealModal">
   <div class="modal">
-    <div class="modal-title">Добавить блюдо</div>
+    <div class="modal-title" id="mealModalTitle">Добавить блюдо</div>
+    <input type="hidden" id="editMealId">
     <div class="form-group">
       <label class="form-label">Название блюда</label>
       <input type="text" class="form-input" id="foodName" placeholder="Например: гречка с курицей">
@@ -439,157 +483,146 @@
       <input type="number" class="form-input" id="foodCal" placeholder="350">
     </div>
     <div class="form-group">
-      <label class="form-label">БЖУ (необязательно)</label>
+      <label class="form-label">БЖУ (г)</label>
       <div class="form-row">
-        <input type="number" class="form-input" id="foodP" placeholder="Б">
-        <input type="number" class="form-input" id="foodF" placeholder="Ж">
-        <input type="number" class="form-input" id="foodC" placeholder="У">
+        <input type="number" class="form-input" id="foodP" placeholder="Белки">
+        <input type="number" class="form-input" id="foodF" placeholder="Жиры">
+        <input type="number" class="form-input" id="foodC" placeholder="Углев">
       </div>
     </div>
-    <button class="submit-btn" id="submitBtn">Сохранить</button>
+    <button class="submit-btn" id="mealSubmitBtn">Сохранить</button>
+  </div>
+</div>
+
+<!-- Water modal -->
+<div class="modal-overlay" id="waterModal">
+  <div class="modal">
+    <div class="modal-title">Добавить воду</div>
+    <div class="form-group">
+      <label class="form-label">Количество (мл)</label>
+      <input type="number" class="form-input" id="waterMl" placeholder="250">
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
+      <button class="submit-btn" style="margin:0;font-size:13px;padding:10px" onclick="setWaterMl(250)">Стакан<br>250мл</button>
+      <button class="submit-btn" style="margin:0;font-size:13px;padding:10px" onclick="setWaterMl(330)">Банка<br>330мл</button>
+      <button class="submit-btn" style="margin:0;font-size:13px;padding:10px" onclick="setWaterMl(500)">Бутылка<br>500мл</button>
+    </div>
+    <button class="submit-btn" id="waterSubmitBtn">Сохранить</button>
   </div>
 </div>
 
 <script>
-// ── Config ──────────────────────────────────────────────────────────────────
 const SUPABASE_URL = 'https://ecomaxacsgdreayvyfnz.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_Avhoql7DMWlCV8JMjnhKjA_yjKecgKI';
 
 const { createClient } = supabase;
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-// ── Telegram WebApp ──────────────────────────────────────────────────────────
 const tg = window.Telegram?.WebApp;
-if (tg) {
-  tg.ready();
-  tg.expand();
-  tg.setHeaderColor('#0e0f12');
-  tg.setBackgroundColor('#0e0f12');
-}
+if (tg) { tg.ready(); tg.expand(); tg.setHeaderColor('#0e0f12'); tg.setBackgroundColor('#0e0f12'); }
 
 const userId = tg?.initDataUnsafe?.user?.id || null;
 
-// ── State ────────────────────────────────────────────────────────────────────
-let currentPeriod = 'today';
-let userSettings  = null;
-let customStart   = null;
-let customEnd     = null;
+let currentPeriod  = 'today';
+let currentSection = 'meals';
+let userSettings   = null;
+let customStart    = null;
+let customEnd      = null;
 
-// ── Date utils ───────────────────────────────────────────────────────────────
-function today() {
-  return new Date().toISOString().split('T')[0];
-}
-
-function daysAgo(n) {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d.toISOString().split('T')[0];
-}
-
-function fmtDate(str) {
-  const d = new Date(str + 'T00:00:00');
-  return d.toLocaleDateString('ru', { day: 'numeric', month: 'short' });
-}
+function today()    { return new Date().toISOString().split('T')[0]; }
+function daysAgo(n) { const d=new Date(); d.setDate(d.getDate()-n); return d.toISOString().split('T')[0]; }
+function fmtDate(s) { return new Date(s+'T00:00:00').toLocaleDateString('ru',{day:'numeric',month:'short'}); }
 
 function getPeriodDates() {
   const t = today();
-  if (currentPeriod === 'today')  return { start: t, end: t };
-  if (currentPeriod === 'week')   return { start: daysAgo(6), end: t };
-  if (currentPeriod === 'month')  return { start: daysAgo(29), end: t };
-  if (currentPeriod === 'custom') return { start: customStart || t, end: customEnd || t };
-  return { start: t, end: t };
+  if (currentPeriod==='today')  return {start:t,end:t};
+  if (currentPeriod==='week')   return {start:daysAgo(6),end:t};
+  if (currentPeriod==='month')  return {start:daysAgo(29),end:t};
+  if (currentPeriod==='custom') return {start:customStart||t,end:customEnd||t};
+  return {start:t,end:t};
 }
 
-// ── Food emoji ───────────────────────────────────────────────────────────────
 function foodEmoji(name) {
   const n = name.toLowerCase();
-  if (n.includes('кофе') || n.includes('чай')) return '☕';
+  if (n.includes('кофе')||n.includes('чай')) return '☕';
   if (n.includes('яйц')) return '🥚';
   if (n.includes('салат')) return '🥗';
-  if (n.includes('суп') || n.includes('борщ')) return '🍲';
+  if (n.includes('суп')||n.includes('борщ')) return '🍲';
   if (n.includes('рис')) return '🍚';
-  if (n.includes('курица') || n.includes('chicken')) return '🍗';
-  if (n.includes('рыб') || n.includes('лосось')) return '🐟';
+  if (n.includes('курица')||n.includes('chicken')) return '🍗';
+  if (n.includes('рыб')||n.includes('лосось')) return '🐟';
   if (n.includes('пицц')) return '🍕';
-  if (n.includes('бургер') || n.includes('сэндвич')) return '🍔';
-  if (n.includes('паст') || n.includes('макарон')) return '🍝';
+  if (n.includes('бургер')||n.includes('сэндвич')) return '🍔';
+  if (n.includes('паст')||n.includes('макарон')) return '🍝';
   if (n.includes('гречк')) return '🌾';
-  if (n.includes('овощ') || n.includes('брокколи')) return '🥦';
-  if (n.includes('фрукт') || n.includes('яблок')) return '🍎';
-  if (n.includes('творог') || n.includes('йогурт')) return '🥛';
-  if (n.includes('хлеб') || n.includes('тост')) return '🍞';
-  if (n.includes('шоколад') || n.includes('конфет')) return '🍫';
+  if (n.includes('овощ')||n.includes('брокколи')) return '🥦';
+  if (n.includes('фрукт')||n.includes('яблок')) return '🍎';
+  if (n.includes('творог')||n.includes('йогурт')) return '🥛';
+  if (n.includes('хлеб')||n.includes('тост')) return '🍞';
+  if (n.includes('шоколад')||n.includes('конфет')) return '🍫';
   return '🍽';
 }
 
-// ── Load data ────────────────────────────────────────────────────────────────
+// ── Data ──────────────────────────────────────────────────────────────────────
 async function loadSettings() {
   if (!userId) return null;
-  const { data } = await sb.from('user_settings').select('*').eq('user_id', userId).single();
+  const {data} = await sb.from('user_settings').select('*').eq('user_id',userId).single();
   return data;
 }
 
-async function loadMeals(start, end) {
+async function loadMeals(start,end) {
   if (!userId) return [];
-  const { data } = await sb.from('meals')
-    .select('*')
-    .eq('user_id', userId)
-    .gte('date', start)
-    .lte('date', end)
-    .order('date').order('time');
-  return data || [];
+  const {data} = await sb.from('meals').select('*').eq('user_id',userId).gte('date',start).lte('date',end).order('date').order('time');
+  return data||[];
 }
 
-async function loadWater(start, end) {
+async function loadWaterEntries(start,end) {
+  if (!userId) return [];
+  const {data} = await sb.from('water').select('*').eq('user_id',userId).gte('date',start).lte('date',end).order('date').order('time');
+  return data||[];
+}
+
+async function loadBurned(start,end) {
   if (!userId) return 0;
-  const { data } = await sb.from('water')
-    .select('amount_ml')
-    .eq('user_id', userId)
-    .gte('date', start)
-    .lte('date', end);
-  return (data || []).reduce((s, r) => s + r.amount_ml, 0);
+  const {data} = await sb.from('burned').select('calories').eq('user_id',userId).gte('date',start).lte('date',end);
+  return (data||[]).reduce((s,r)=>s+r.calories,0);
 }
 
-async function loadBurned(start, end) {
-  if (!userId) return 0;
-  const { data } = await sb.from('burned')
-    .select('calories')
-    .eq('user_id', userId)
-    .gte('date', start)
-    .lte('date', end);
-  return (data || []).reduce((s, r) => s + r.calories, 0);
-}
+async function deleteMeal(id)  { await sb.from('meals').delete().eq('id',id); renderAll(); }
+async function deleteWater(id) { await sb.from('water').delete().eq('id',id); renderAll(); }
 
-// ── Delete meal ───────────────────────────────────────────────────────────────
-async function deleteMeal(id) {
-  await sb.from('meals').delete().eq('id', id);
+async function updateMeal(id, food, calories, protein, fat, carbs) {
+  await sb.from('meals').update({food,calories,protein:protein||0,fat:fat||0,carbs:carbs||0}).eq('id',id);
   renderAll();
 }
 
-// ── Add meal ──────────────────────────────────────────────────────────────────
 async function addMeal(food, calories, protein, fat, carbs) {
   const now = new Date();
-  const dateStr = now.toISOString().split('T')[0];
-  const timeStr = now.toTimeString().slice(0,5);
   await sb.from('meals').insert({
-    user_id: userId,
-    date: dateStr,
-    time: timeStr,
-    food, calories,
-    protein: protein || 0,
-    fat: fat || 0,
-    carbs: carbs || 0
+    user_id:userId, date:now.toISOString().split('T')[0],
+    time:now.toTimeString().slice(0,5),
+    food,calories,protein:protein||0,fat:fat||0,carbs:carbs||0
+  });
+  renderAll();
+}
+
+async function addWater(ml) {
+  const now = new Date();
+  await sb.from('water').insert({
+    user_id:userId, date:now.toISOString().split('T')[0],
+    time:now.toTimeString().slice(0,5), amount_ml:ml
   });
   renderAll();
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
-function renderSummary(meals, waterMl, burnedCal, settings) {
-  const totalCal = meals.reduce((s, m) => s + m.calories, 0);
-  const calGoal  = settings?.calories_goal || 2000;
-  const waterGoal = settings?.water_goal_ml || 2500;
-  const calPct   = Math.min(totalCal / calGoal, 1);
-  const waterPct = Math.min(waterMl / waterGoal, 1);
+function renderSummary(meals, waterEntries, burnedCal, settings) {
+  const totalCal  = meals.reduce((s,m)=>s+m.calories,0);
+  const waterMl   = waterEntries.reduce((s,w)=>s+w.amount_ml,0);
+  const calGoal   = settings?.calories_goal||2000;
+  const waterGoal = settings?.water_goal_ml||2500;
+  const calPct    = Math.min(totalCal/calGoal,1);
+  const waterPct  = Math.min(waterMl/waterGoal,1);
 
   document.getElementById('summaryRow').innerHTML = `
     <div class="summary-card">
@@ -599,7 +632,7 @@ function renderSummary(meals, waterMl, burnedCal, settings) {
     </div>
     <div class="summary-card">
       <div class="card-label">Вода</div>
-      <div class="card-value">${waterMl}<span class="card-unit"> мл</span></div>
+      <div class="card-value">${waterMl}<span class="card-unit"> / ${waterGoal} мл</span></div>
       <div class="card-bar"><div class="card-bar-fill" style="width:${waterPct*100}%;background:linear-gradient(90deg,#4ef0ff,#7cffa4)"></div></div>
     </div>
     ${burnedCal ? `
@@ -616,84 +649,106 @@ function renderSummary(meals, waterMl, burnedCal, settings) {
   `;
 }
 
-function renderMeals(meals) {
+function renderMealsContent(meals) {
   const content = document.getElementById('content');
-
   if (!meals.length) {
-    content.innerHTML = `
-      <div class="empty">
-        <div class="empty-icon">🍽</div>
-        <div class="empty-title">Пусто</div>
-        <div class="empty-sub">Нет записей за этот период</div>
-      </div>`;
+    content.innerHTML = `<div class="empty"><div class="empty-icon">🍽</div><div class="empty-title">Пусто</div><div class="empty-sub">Нет записей за этот период</div></div>`;
     return;
   }
 
-  if (currentPeriod === 'today') {
-    content.innerHTML = `<div class="meals-list">
-      ${meals.map(m => `
-        <div class="meal-card">
-          <div class="meal-icon">${foodEmoji(m.food)}</div>
-          <div class="meal-info">
-            <div class="meal-name">${m.food}</div>
-            <div class="meal-meta">${m.time} · Б${(m.protein||0).toFixed(0)} Ж${(m.fat||0).toFixed(0)} У${(m.carbs||0).toFixed(0)}</div>
-          </div>
-          <div class="meal-cal">${m.calories}</div>
-          <button class="meal-delete" onclick="deleteMeal(${m.id})">✕</button>
+  function mealCard(m) {
+    return `
+      <div class="meal-card">
+        <div class="meal-icon">${foodEmoji(m.food)}</div>
+        <div class="meal-info">
+          <div class="meal-name">${m.food}</div>
+          <div class="meal-meta">${m.time} · 🔥${m.calories} · Б${(m.protein||0).toFixed(0)} Ж${(m.fat||0).toFixed(0)} У${(m.carbs||0).toFixed(0)}</div>
         </div>
-      `).join('')}
-    </div>`;
-  } else {
-    // Group by date
-    const byDay = {};
-    meals.forEach(m => {
-      if (!byDay[m.date]) byDay[m.date] = [];
-      byDay[m.date].push(m);
-    });
+        <div class="meal-actions">
+          <button class="icon-btn edit" onclick="openEditMeal(${m.id},'${m.food.replace(/'/g,"\\'")}',${m.calories},${m.protein||0},${m.fat||0},${m.carbs||0})" title="Редактировать">✏️</button>
+          <button class="icon-btn del" onclick="deleteMeal(${m.id})" title="Удалить">✕</button>
+        </div>
+      </div>`;
+  }
 
-    content.innerHTML = Object.entries(byDay).reverse().map(([date, dayMeals]) => {
-      const total = dayMeals.reduce((s, m) => s + m.calories, 0);
-      return `
-        <div class="day-group">
-          <div class="day-header">
-            <div class="day-date">${fmtDate(date)}</div>
-            <div class="day-total">${total} ккал</div>
-          </div>
-          <div class="meals-list">
-            ${dayMeals.map(m => `
-              <div class="meal-card">
-                <div class="meal-icon">${foodEmoji(m.food)}</div>
-                <div class="meal-info">
-                  <div class="meal-name">${m.food}</div>
-                  <div class="meal-meta">${m.time}</div>
-                </div>
-                <div class="meal-cal">${m.calories}</div>
-                <button class="meal-delete" onclick="deleteMeal(${m.id})">✕</button>
-              </div>
-            `).join('')}
-          </div>
-        </div>`;
+  if (currentPeriod==='today') {
+    content.innerHTML = `<div class="meals-list">${meals.map(mealCard).join('')}</div>`;
+  } else {
+    const byDay = {};
+    meals.forEach(m => { if(!byDay[m.date]) byDay[m.date]=[]; byDay[m.date].push(m); });
+    content.innerHTML = Object.entries(byDay).reverse().map(([date,dayMeals]) => {
+      const total = dayMeals.reduce((s,m)=>s+m.calories,0);
+      return `<div class="day-group">
+        <div class="day-header"><div class="day-date">${fmtDate(date)}</div><div class="day-total">${total} ккал</div></div>
+        <div class="meals-list">${dayMeals.map(mealCard).join('')}</div>
+      </div>`;
+    }).join('');
+  }
+}
+
+function renderWaterContent(entries) {
+  const content = document.getElementById('content');
+  if (!entries.length) {
+    content.innerHTML = `<div class="empty"><div class="empty-icon">💧</div><div class="empty-title">Пусто</div><div class="empty-sub">Нет записей о воде</div></div>`;
+    return;
+  }
+
+  function waterCard(w) {
+    return `
+      <div class="water-entry">
+        <div class="water-icon">💧</div>
+        <div class="water-info">
+          <div class="water-ml">${w.amount_ml} мл</div>
+          <div class="meal-meta">${w.time}</div>
+        </div>
+        <button class="icon-btn del" onclick="deleteWater(${w.id})" title="Удалить">✕</button>
+      </div>`;
+  }
+
+  if (currentPeriod==='today') {
+    content.innerHTML = `<div class="meals-list">${entries.map(waterCard).join('')}</div>`;
+  } else {
+    const byDay = {};
+    entries.forEach(w => { if(!byDay[w.date]) byDay[w.date]=[]; byDay[w.date].push(w); });
+    content.innerHTML = Object.entries(byDay).reverse().map(([date,dayEntries]) => {
+      const total = dayEntries.reduce((s,w)=>s+w.amount_ml,0);
+      return `<div class="day-group">
+        <div class="day-header"><div class="day-date">${fmtDate(date)}</div><div class="day-total">${total} мл</div></div>
+        <div class="meals-list">${dayEntries.map(waterCard).join('')}</div>
+      </div>`;
     }).join('');
   }
 }
 
 async function renderAll() {
-  const { start, end } = getPeriodDates();
-  const [meals, waterMl, burnedCal] = await Promise.all([
-    loadMeals(start, end),
-    loadWater(start, end),
-    loadBurned(start, end),
+  const {start,end} = getPeriodDates();
+  const [meals, waterEntries, burnedCal] = await Promise.all([
+    loadMeals(start,end),
+    loadWaterEntries(start,end),
+    loadBurned(start,end),
   ]);
-  renderSummary(meals, waterMl, burnedCal, userSettings);
-  renderMeals(meals);
+  renderSummary(meals, waterEntries, burnedCal, userSettings);
+  if (currentSection==='meals') renderMealsContent(meals);
+  else renderWaterContent(waterEntries);
 }
+
+// ── Edit meal modal ────────────────────────────────────────────────────────────
+function openEditMeal(id, food, cal, p, f, c) {
+  document.getElementById('mealModalTitle').textContent = 'Редактировать блюдо';
+  document.getElementById('editMealId').value = id;
+  document.getElementById('foodName').value = food;
+  document.getElementById('foodCal').value  = cal;
+  document.getElementById('foodP').value    = p;
+  document.getElementById('foodF').value    = f;
+  document.getElementById('foodC').value    = c;
+  document.getElementById('mealModal').classList.add('open');
+}
+
+function setWaterMl(ml) { document.getElementById('waterMl').value = ml; }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
-  document.getElementById('dateLabel').textContent = new Date().toLocaleDateString('ru', {
-    day: 'numeric', month: 'long'
-  });
-
+  document.getElementById('dateLabel').textContent = new Date().toLocaleDateString('ru',{day:'numeric',month:'long'});
   document.getElementById('content').innerHTML = `<div class="loading"><div class="spinner"></div></div>`;
 
   userSettings = await loadSettings();
@@ -703,14 +758,13 @@ async function init() {
   document.querySelectorAll('.tab').forEach(tab => {
     tab.addEventListener('click', async () => {
       const period = tab.dataset.period;
-      if (period === 'custom') {
+      if (period==='custom') {
         const start = prompt('Начало (ГГГГ-ММ-ДД):');
         const end   = prompt('Конец (ГГГГ-ММ-ДД):');
-        if (!start || !end) return;
-        customStart = start;
-        customEnd   = end;
+        if (!start||!end) return;
+        customStart=start; customEnd=end;
       }
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
       tab.classList.add('active');
       currentPeriod = period;
       document.getElementById('content').innerHTML = `<div class="loading"><div class="spinner"></div></div>`;
@@ -718,33 +772,72 @@ async function init() {
     });
   });
 
-  // Add modal
-  document.getElementById('addBtn').addEventListener('click', () => {
-    document.getElementById('modalOverlay').classList.add('open');
+  // Section tabs (Еда / Вода)
+  document.querySelectorAll('.section-tab').forEach(tab => {
+    tab.addEventListener('click', async () => {
+      document.querySelectorAll('.section-tab').forEach(t=>t.classList.remove('active'));
+      tab.classList.add('active');
+      currentSection = tab.dataset.section;
+      document.getElementById('sectionTitle').textContent = currentSection==='meals' ? 'Дневник' : 'Вода';
+      document.getElementById('content').innerHTML = `<div class="loading"><div class="spinner"></div></div>`;
+      await renderAll();
+    });
   });
 
-  document.getElementById('modalOverlay').addEventListener('click', e => {
-    if (e.target === e.currentTarget) {
-      document.getElementById('modalOverlay').classList.remove('open');
+  // Add button
+  document.getElementById('addBtn').addEventListener('click', () => {
+    if (currentSection==='meals') {
+      document.getElementById('mealModalTitle').textContent = 'Добавить блюдо';
+      document.getElementById('editMealId').value = '';
+      document.getElementById('foodName').value = '';
+      document.getElementById('foodCal').value  = '';
+      document.getElementById('foodP').value    = '';
+      document.getElementById('foodF').value    = '';
+      document.getElementById('foodC').value    = '';
+      document.getElementById('mealModal').classList.add('open');
+    } else {
+      document.getElementById('waterMl').value = '';
+      document.getElementById('waterModal').classList.add('open');
     }
   });
 
-  document.getElementById('submitBtn').addEventListener('click', async () => {
+  // Close modals on overlay click
+  ['mealModal','waterModal'].forEach(id => {
+    document.getElementById(id).addEventListener('click', e => {
+      if (e.target===e.currentTarget) document.getElementById(id).classList.remove('open');
+    });
+  });
+
+  // Meal submit
+  document.getElementById('mealSubmitBtn').addEventListener('click', async () => {
     const food = document.getElementById('foodName').value.trim();
     const cal  = parseInt(document.getElementById('foodCal').value);
-    const p    = parseFloat(document.getElementById('foodP').value) || 0;
-    const f    = parseFloat(document.getElementById('foodF').value) || 0;
-    const c    = parseFloat(document.getElementById('foodC').value) || 0;
-    if (!food || !cal) { alert('Заполни название и калории'); return; }
-    document.getElementById('submitBtn').textContent = 'Сохраняю...';
-    await addMeal(food, cal, p, f, c);
-    document.getElementById('modalOverlay').classList.remove('open');
-    document.getElementById('foodName').value = '';
-    document.getElementById('foodCal').value = '';
-    document.getElementById('foodP').value = '';
-    document.getElementById('foodF').value = '';
-    document.getElementById('foodC').value = '';
-    document.getElementById('submitBtn').textContent = 'Сохранить';
+    const p    = parseFloat(document.getElementById('foodP').value)||0;
+    const f    = parseFloat(document.getElementById('foodF').value)||0;
+    const c    = parseFloat(document.getElementById('foodC').value)||0;
+    if (!food||!cal) { alert('Заполни название и калории'); return; }
+
+    const editId = document.getElementById('editMealId').value;
+    document.getElementById('mealSubmitBtn').textContent = 'Сохраняю...';
+
+    if (editId) {
+      await updateMeal(parseInt(editId), food, cal, p, f, c);
+    } else {
+      await addMeal(food, cal, p, f, c);
+    }
+
+    document.getElementById('mealModal').classList.remove('open');
+    document.getElementById('mealSubmitBtn').textContent = 'Сохранить';
+  });
+
+  // Water submit
+  document.getElementById('waterSubmitBtn').addEventListener('click', async () => {
+    const ml = parseInt(document.getElementById('waterMl').value);
+    if (!ml||ml<1) { alert('Введи количество мл'); return; }
+    document.getElementById('waterSubmitBtn').textContent = 'Сохраняю...';
+    await addWater(ml);
+    document.getElementById('waterModal').classList.remove('open');
+    document.getElementById('waterSubmitBtn').textContent = 'Сохранить';
   });
 }
 
