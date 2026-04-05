@@ -594,9 +594,12 @@
 
 <div id="content"></div>
 <div class="weight-section pb" id="weightSection" style="display:none">
+  <div class="weight-header" style="margin-bottom:16px">
+    <button onclick="closeWeightSection()" style="background:none;border:none;color:var(--accent);font-size:14px;font-weight:700;cursor:pointer;padding:0">← Назад</button>
+    <button class="weight-add-btn" onclick="addWeightEntry()">+ Записать</button>
+  </div>
   <div class="weight-header">
     <div class="weight-title">⚖️ Динамика веса</div>
-    <button class="weight-add-btn" onclick="addWeightEntry()">+ Записать</button>
   </div>
   <div class="weight-chart" id="weightChart"></div>
   <div class="weight-log-list" id="weightLog"></div>
