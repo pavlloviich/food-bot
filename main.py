@@ -1,15 +1,12 @@
 """
-EasyFoodTrack Bot — чистая версия
-- GPT-4o-mini везде (дёшево)
+EasyFoodTrack Bot — версия с Supabase
+- Данные хранятся в Supabase (PostgreSQL) — не теряются при перезапуске
+- GPT-4o-mini везде
 - Без Whoop
-- Онбординг: пол, возраст, вес, рост, активность, цель
-- Вода, калории, итог дня
-- Уведомления по местному времени
 """
 
 import asyncio
 import os
-import sqlite3
 import tempfile
 import json
 import base64
@@ -22,16 +19,19 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 from openai import AsyncOpenAI
+from supabase import create_client, Client
 
 # ── Конфиг ────────────────────────────────────────────────────────────────────
 
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "ВАШ_ТОКЕН")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "ВАШ_КЛЮЧ")
-DB_PATH        = "bot.db"
+TELEGRAM_TOKEN    = os.getenv("TELEGRAM_TOKEN", "")
+OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY", "")
+SUPABASE_URL      = os.getenv("SUPABASE_URL", "")
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 
 bot    = Bot(token=TELEGRAM_TOKEN)
 dp     = Dispatcher(storage=MemoryStorage())
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+sb: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 # ── FSM ────────────────────────────────────────────────────────────────────────
 
@@ -49,134 +49,92 @@ class ChangeNotify(StatesGroup):
     tz   = State()
     hour = State()
 
-# ── БД ────────────────────────────────────────────────────────────────────────
-
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS meals (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            date TEXT NOT NULL, time TEXT NOT NULL,
-            food TEXT NOT NULL, calories INTEGER NOT NULL,
-            protein REAL DEFAULT 0, fat REAL DEFAULT 0, carbs REAL DEFAULT 0
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS water (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            date TEXT NOT NULL, time TEXT NOT NULL,
-            amount_ml INTEGER NOT NULL
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS burned (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            date TEXT NOT NULL, time TEXT NOT NULL,
-            calories INTEGER NOT NULL
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS user_settings (
-            user_id           INTEGER PRIMARY KEY,
-            gender            TEXT DEFAULT '',
-            age               INTEGER DEFAULT 0,
-            weight_kg         REAL DEFAULT 0,
-            height_cm         REAL DEFAULT 0,
-            activity          TEXT DEFAULT 'medium',
-            goal              TEXT DEFAULT 'maintain',
-            calories_goal     INTEGER DEFAULT 2000,
-            calories_deficit  INTEGER DEFAULT 1500,
-            calories_surplus  INTEGER DEFAULT 2500,
-            water_goal_ml     INTEGER DEFAULT 2500,
-            timezone_offset   INTEGER DEFAULT 0,
-            notify_hour       INTEGER DEFAULT 21,
-            summary_sent_date TEXT DEFAULT '',
-            setup_done        INTEGER DEFAULT 0
-        )
-    """)
-    conn.commit()
-    conn.close()
+# ── Supabase хелперы ──────────────────────────────────────────────────────────
 
 def get_setting(user_id, key, default=None):
-    conn = sqlite3.connect(DB_PATH)
-    row  = conn.execute(f"SELECT {key} FROM user_settings WHERE user_id=?", (user_id,)).fetchone()
-    conn.close()
-    return row[0] if row else default
+    try:
+        r = sb.table("user_settings").select(key).eq("user_id", user_id).single().execute()
+        return r.data.get(key, default) if r.data else default
+    except:
+        return default
 
 def set_setting(user_id, key, value):
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("INSERT OR IGNORE INTO user_settings (user_id) VALUES (?)", (user_id,))
-    conn.execute(f"UPDATE user_settings SET {key}=? WHERE user_id=?", (value, user_id))
-    conn.commit()
-    conn.close()
+    try:
+        exists = sb.table("user_settings").select("user_id").eq("user_id", user_id).execute()
+        if exists.data:
+            sb.table("user_settings").update({key: value}).eq("user_id", user_id).execute()
+        else:
+            sb.table("user_settings").insert({"user_id": user_id, key: value}).execute()
+    except Exception as e:
+        print(f"set_setting error: {e}")
+
+def set_settings_bulk(user_id, data: dict):
+    try:
+        exists = sb.table("user_settings").select("user_id").eq("user_id", user_id).execute()
+        data["user_id"] = user_id
+        if exists.data:
+            sb.table("user_settings").update(data).eq("user_id", user_id).execute()
+        else:
+            sb.table("user_settings").insert(data).execute()
+    except Exception as e:
+        print(f"set_settings_bulk error: {e}")
 
 def save_meal(user_id, food, calories, protein=0, fat=0, carbs=0):
     now = datetime.now()
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        "INSERT INTO meals (user_id,date,time,food,calories,protein,fat,carbs) VALUES (?,?,?,?,?,?,?,?)",
-        (user_id, now.strftime("%Y-%m-%d"), now.strftime("%H:%M"), food, calories, protein, fat, carbs)
-    )
-    conn.commit(); conn.close()
+    sb.table("meals").insert({
+        "user_id": user_id,
+        "date": now.strftime("%Y-%m-%d"),
+        "time": now.strftime("%H:%M"),
+        "food": food, "calories": calories,
+        "protein": protein, "fat": fat, "carbs": carbs
+    }).execute()
 
 def save_water(user_id, ml):
     now = datetime.now()
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        "INSERT INTO water (user_id,date,time,amount_ml) VALUES (?,?,?,?)",
-        (user_id, now.strftime("%Y-%m-%d"), now.strftime("%H:%M"), ml)
-    )
-    conn.commit(); conn.close()
+    sb.table("water").insert({
+        "user_id": user_id,
+        "date": now.strftime("%Y-%m-%d"),
+        "time": now.strftime("%H:%M"),
+        "amount_ml": ml
+    }).execute()
 
 def save_burned(user_id, calories):
     now = datetime.now()
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute(
-        "INSERT INTO burned (user_id,date,time,calories) VALUES (?,?,?,?)",
-        (user_id, now.strftime("%Y-%m-%d"), now.strftime("%H:%M"), calories)
-    )
-    conn.commit(); conn.close()
+    sb.table("burned").insert({
+        "user_id": user_id,
+        "date": now.strftime("%Y-%m-%d"),
+        "time": now.strftime("%H:%M"),
+        "calories": calories
+    }).execute()
 
 def get_today_meals(user_id):
     today = date.today().strftime("%Y-%m-%d")
-    conn  = sqlite3.connect(DB_PATH)
-    rows  = conn.execute(
-        "SELECT time,food,calories,protein,fat,carbs FROM meals WHERE user_id=? AND date=? ORDER BY time",
-        (user_id, today)
-    ).fetchall()
-    conn.close()
-    return [{"time":r[0],"food":r[1],"calories":r[2],"protein":r[3],"fat":r[4],"carbs":r[5]} for r in rows]
+    r = sb.table("meals").select("*").eq("user_id", user_id).eq("date", today).order("time").execute()
+    return r.data or []
+
+def get_period_meals(user_id, start_date, end_date):
+    r = sb.table("meals").select("*").eq("user_id", user_id)\
+        .gte("date", start_date).lte("date", end_date).order("date").order("time").execute()
+    return r.data or []
 
 def get_today_water(user_id):
     today = date.today().strftime("%Y-%m-%d")
-    conn  = sqlite3.connect(DB_PATH)
-    row   = conn.execute(
-        "SELECT COALESCE(SUM(amount_ml),0) FROM water WHERE user_id=? AND date=?",
-        (user_id, today)
-    ).fetchone()
-    conn.close()
-    return row[0] if row else 0
+    r = sb.table("water").select("amount_ml").eq("user_id", user_id).eq("date", today).execute()
+    return sum(row["amount_ml"] for row in (r.data or []))
 
 def get_today_burned(user_id):
     today = date.today().strftime("%Y-%m-%d")
-    conn  = sqlite3.connect(DB_PATH)
-    row   = conn.execute(
-        "SELECT COALESCE(SUM(calories),0) FROM burned WHERE user_id=? AND date=?",
-        (user_id, today)
-    ).fetchone()
-    conn.close()
-    return row[0] if row else 0
+    r = sb.table("burned").select("calories").eq("user_id", user_id).eq("date", today).execute()
+    return sum(row["calories"] for row in (r.data or []))
+
+def delete_meal(meal_id):
+    sb.table("meals").delete().eq("id", meal_id).execute()
 
 def get_all_active_users():
-    conn = sqlite3.connect(DB_PATH)
-    rows = conn.execute(
-        "SELECT user_id,notify_hour,timezone_offset,summary_sent_date FROM user_settings WHERE setup_done=1"
-    ).fetchall()
-    conn.close()
-    return rows
+    r = sb.table("user_settings").select(
+        "user_id,notify_hour,timezone_offset,summary_sent_date"
+    ).eq("setup_done", 1).execute()
+    return r.data or []
 
 # ── Расчёт калорий ────────────────────────────────────────────────────────────
 
@@ -211,7 +169,7 @@ FOOD_PROMPT = """Ты диетолог-аналитик. Ответь ТОЛЬК
   "comment": ""
 }
 Если это вода/жидкость без калорий — is_water: true, water_ml: количество мл.
-Если это сожжённые калории (тренировка, активность) — is_burned: true, burned_calories: количество.
+Если это сожжённые калории (тренировка) — is_burned: true, burned_calories: количество.
 Делай разумную оценку порции если вес не указан."""
 
 async def analyze_text(text):
@@ -276,9 +234,9 @@ async def build_summary(user_id):
     goal_type  = get_setting(user_id, "goal") or "maintain"
 
     total_cal = sum(m["calories"] for m in meals)
-    total_p   = sum(m["protein"] or 0 for m in meals)
-    total_f   = sum(m["fat"]     or 0 for m in meals)
-    total_c   = sum(m["carbs"]   or 0 for m in meals)
+    total_p   = sum(m.get("protein") or 0 for m in meals)
+    total_f   = sum(m.get("fat")     or 0 for m in meals)
+    total_c   = sum(m.get("carbs")   or 0 for m in meals)
 
     lines = ["📊 *Итог дня*\n"]
 
@@ -331,8 +289,7 @@ def tz_keyboard():
 
 def hour_keyboard():
     hours = [18, 19, 20, 21, 22, 23]
-    rows  = []
-    row   = []
+    rows, row = [], []
     for h in hours:
         row.append(InlineKeyboardButton(text=f"{h}:00", callback_data=f"hour_{h}"))
         if len(row) == 3:
@@ -351,6 +308,8 @@ async def cmd_start(msg: Message, state: FSMContext):
             "💧 *'выпил стакан воды'* → вода\n"
             "💪 *'пробежал 5км'* или */burned 300* → сожжённые калории\n\n"
             "/today — еда за сегодня\n"
+            "/diary — дневник с удалением\n"
+            "/month — сводка за период\n"
             "/summary — итог дня\n"
             "/water — вода\n"
             "/goal — изменить цель\n"
@@ -440,7 +399,7 @@ async def setup_goal(call: CallbackQuery, state: FSMContext):
         f"⚖️ Для поддержания: *{tdee} ккал/день*\n"
         f"📈 Для набора массы: *{surplus} ккал/день*\n\n"
         f"🎯 Твоя цель ({labels[goal]}): *{goal_cal} ккал/день*\n\n"
-        f"Теперь выбери свой часовой пояс:",
+        f"Выбери свой часовой пояс:",
         reply_markup=tz_keyboard(),
         parse_mode="Markdown"
     )
@@ -461,25 +420,23 @@ async def setup_hour(call: CallbackQuery, state: FSMContext):
     hour = int(call.data.split("_")[1])
     d    = await state.get_data()
     uid  = call.from_user.id
-    for k, v in [
-        ("gender", d["gender"]), ("age", d["age"]),
-        ("weight_kg", d["weight_kg"]), ("height_cm", d["height_cm"]),
-        ("activity", d["activity"]), ("goal", d["goal"]),
-        ("calories_goal", d["goal_cal"]), ("calories_deficit", d["deficit"]),
-        ("calories_surplus", d["surplus"]), ("water_goal_ml", 2500),
-        ("timezone_offset", d.get("tz_offset", 0)),
-        ("notify_hour", hour), ("setup_done", 1),
-    ]:
-        set_setting(uid, k, v)
+    tz   = d.get("tz_offset", 0)
+    set_settings_bulk(uid, {
+        "gender": d["gender"], "age": d["age"],
+        "weight_kg": d["weight_kg"], "height_cm": d["height_cm"],
+        "activity": d["activity"], "goal": d["goal"],
+        "calories_goal": d["goal_cal"], "calories_deficit": d["deficit"],
+        "calories_surplus": d["surplus"], "water_goal_ml": 2500,
+        "timezone_offset": tz, "notify_hour": hour, "setup_done": 1,
+    })
     await state.clear()
-    tz = d.get("tz_offset", 0)
     await call.message.edit_text(
         f"🎉 *Всё готово!*\n\n"
         f"🔔 Сводка каждый день в *{hour}:00* (UTC{'+' if tz>=0 else ''}{tz})\n\n"
         f"Отправляй фото еды, голосовые или текст!\n"
         f"💧 'выпил стакан воды' — вода\n"
         f"💪 'пробежал 5км' — сожжённые калории\n\n"
-        f"/summary — итог дня в любой момент",
+        f"/summary — итог дня",
         parse_mode="Markdown"
     )
 
@@ -491,8 +448,7 @@ async def cmd_notify(msg: Message, state: FSMContext):
     cur_tz = get_setting(msg.from_user.id, "timezone_offset") or 0
     await msg.answer(
         f"🔔 Сейчас: *{cur_h}:00* (UTC{'+' if cur_tz>=0 else ''}{cur_tz})\n\nВыбери часовой пояс:",
-        reply_markup=tz_keyboard(),
-        parse_mode="Markdown"
+        reply_markup=tz_keyboard(), parse_mode="Markdown"
     )
     await state.set_state(ChangeNotify.tz)
 
@@ -529,7 +485,7 @@ async def cmd_goal(msg: Message, state: FSMContext):
         [InlineKeyboardButton(text=f"📉 Похудеть ({deficit} ккал/день)",      callback_data="setgoal_lose")],
         [InlineKeyboardButton(text=f"⚖️ Поддержать вес ({tdee} ккал/день)",   callback_data="setgoal_maintain")],
         [InlineKeyboardButton(text=f"📈 Набрать массу ({surplus} ккал/день)", callback_data="setgoal_gain")],
-        [InlineKeyboardButton(text="🔄 Пересчитать (изменился вес/активность)", callback_data="setgoal_recalc")],
+        [InlineKeyboardButton(text="🔄 Пересчитать",                           callback_data="setgoal_recalc")],
     ])
     await msg.answer("🎯 Выбери цель:", reply_markup=kb)
 
@@ -558,6 +514,95 @@ async def cb_setgoal(call: CallbackQuery, state: FSMContext):
         parse_mode="Markdown"
     )
 
+# ── /diary — дневник с удалением ──────────────────────────────────────────────
+
+@dp.message(Command("diary"))
+async def cmd_diary(msg: Message):
+    meals = get_today_meals(msg.from_user.id)
+    if not meals:
+        await msg.answer("📭 Сегодня записей нет.")
+        return
+    await msg.answer("📋 *Дневник за сегодня*\nНажми ❌ чтобы удалить запись:", parse_mode="Markdown")
+    for m in meals:
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Удалить", callback_data=f"del_{m['id']}")]
+        ])
+        await msg.answer(
+            f"🕐 {m['time']} — *{m['food']}*\n🔥 {m['calories']} ккал",
+            reply_markup=kb, parse_mode="Markdown"
+        )
+
+@dp.callback_query(F.data.startswith("del_"))
+async def cb_delete_meal(call: CallbackQuery):
+    meal_id = int(call.data.split("_")[1])
+    delete_meal(meal_id)
+    await call.message.edit_text("🗑 Запись удалена.")
+
+# ── /month — сводка за период ─────────────────────────────────────────────────
+
+@dp.message(Command("month"))
+async def cmd_month(msg: Message):
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📅 Сегодня",    callback_data="period_today")],
+        [InlineKeyboardButton(text="📅 7 дней",     callback_data="period_7")],
+        [InlineKeyboardButton(text="📅 30 дней",    callback_data="period_30")],
+    ])
+    await msg.answer("За какой период показать статистику?", reply_markup=kb)
+
+@dp.callback_query(F.data.startswith("period_"))
+async def cb_period(call: CallbackQuery):
+    period = call.data.split("_")[1]
+    today  = date.today()
+
+    if period == "today":
+        start = today
+    elif period == "7":
+        from datetime import timedelta
+        start = today - timedelta(days=6)
+    else:
+        from datetime import timedelta
+        start = today - timedelta(days=29)
+
+    meals = get_period_meals(
+        call.from_user.id,
+        start.strftime("%Y-%m-%d"),
+        today.strftime("%Y-%m-%d")
+    )
+
+    if not meals:
+        await call.message.edit_text("📭 Нет данных за этот период.")
+        return
+
+    # Группируем по дням
+    by_day = {}
+    for m in meals:
+        d = m["date"]
+        if d not in by_day:
+            by_day[d] = []
+        by_day[d].append(m)
+
+    lines = [f"📊 *Статистика за {len(by_day)} дней*\n```"]
+    lines.append(f"{'Дата':<10} {'Ккал':>6} {'Б':>5} {'Ж':>5} {'У':>5}")
+    lines.append("─" * 35)
+
+    total_cal_all = 0
+    for day, day_meals in sorted(by_day.items()):
+        cal = sum(m["calories"] for m in day_meals)
+        p   = sum(m.get("protein") or 0 for m in day_meals)
+        f   = sum(m.get("fat")     or 0 for m in day_meals)
+        c   = sum(m.get("carbs")   or 0 for m in day_meals)
+        total_cal_all += cal
+        # Форматируем дату покороче
+        d_short = day[5:]  # MM-DD
+        lines.append(f"{d_short:<10} {cal:>6} {p:>5.0f} {f:>5.0f} {c:>5.0f}")
+
+    lines.append("─" * 35)
+    avg = total_cal_all // len(by_day)
+    lines.append(f"{'Среднее':<10} {avg:>6}")
+    lines.append("```")
+
+    await call.message.edit_text("\n".join(lines), parse_mode="Markdown")
+
 # ── /burned ────────────────────────────────────────────────────────────────────
 
 @dp.message(Command("burned"))
@@ -566,7 +611,10 @@ async def cmd_burned(msg: Message):
         cal = int(msg.text.split()[1])
         save_burned(msg.from_user.id, cal)
         total = get_today_burned(msg.from_user.id)
-        await msg.answer(f"💪 +*{cal} ккал* сожжено!\n\nВсего сегодня сожжено: *{total} ккал*", parse_mode="Markdown")
+        await msg.answer(
+            f"💪 +*{cal} ккал* сожжено!\nВсего сегодня: *{total} ккал*",
+            parse_mode="Markdown"
+        )
     except:
         await msg.answer("Используй так: /burned 300")
 
@@ -600,11 +648,9 @@ async def cmd_water(msg: Message):
 @dp.message(Command("clear"))
 async def cmd_clear(msg: Message):
     today = date.today().strftime("%Y-%m-%d")
-    conn  = sqlite3.connect(DB_PATH)
-    conn.execute("DELETE FROM meals  WHERE user_id=? AND date=?", (msg.from_user.id, today))
-    conn.execute("DELETE FROM water  WHERE user_id=? AND date=?", (msg.from_user.id, today))
-    conn.execute("DELETE FROM burned WHERE user_id=? AND date=?", (msg.from_user.id, today))
-    conn.commit(); conn.close()
+    sb.table("meals").delete().eq("user_id", msg.from_user.id).eq("date", today).execute()
+    sb.table("water").delete().eq("user_id", msg.from_user.id).eq("date", today).execute()
+    sb.table("burned").delete().eq("user_id", msg.from_user.id).eq("date", today).execute()
     await msg.answer("🗑 Дневник за сегодня очищен.")
 
 # ── Обработка сообщений ────────────────────────────────────────────────────────
@@ -650,7 +696,6 @@ async def handle_text(msg: Message):
 async def process_input(user_id, text, wait_msg):
     try:
         data = await analyze_text(text)
-
         if data.get("is_water"):
             ml    = data.get("water_ml") or 250
             save_water(user_id, ml)
@@ -665,7 +710,7 @@ async def process_input(user_id, text, wait_msg):
             save_burned(user_id, cal)
             total = get_today_burned(user_id)
             await wait_msg.edit_text(
-                f"💪 +*{cal} ккал* сожжено!\n\nВсего сегодня: *{total} ккал*",
+                f"💪 +*{cal} ккал* сожжено!\nВсего сегодня: *{total} ккал*",
                 parse_mode="Markdown"
             )
         else:
@@ -687,22 +732,21 @@ async def auto_summary_task():
         await asyncio.sleep(60)
         now_utc = datetime.utcnow()
         today   = date.today().strftime("%Y-%m-%d")
-        for user_id, notify_hour, tz_offset, sent_date in get_all_active_users():
-            local_hour = (now_utc.hour + (tz_offset or 0)) % 24
-            if local_hour == (notify_hour or 21) and now_utc.minute < 2:
-                if sent_date != today:
+        for user in get_all_active_users():
+            local_hour = (now_utc.hour + (user.get("timezone_offset") or 0)) % 24
+            if local_hour == (user.get("notify_hour") or 21) and now_utc.minute < 2:
+                if user.get("summary_sent_date") != today:
                     try:
-                        text = await build_summary(user_id)
-                        await bot.send_message(user_id, f"🌙 *Вечерняя сводка*\n\n{text}", parse_mode="Markdown")
-                        set_setting(user_id, "summary_sent_date", today)
+                        text = await build_summary(user["user_id"])
+                        await bot.send_message(user["user_id"], f"🌙 *Вечерняя сводка*\n\n{text}", parse_mode="Markdown")
+                        set_setting(user["user_id"], "summary_sent_date", today)
                     except:
                         pass
 
 # ── Запуск ─────────────────────────────────────────────────────────────────────
 
 async def main():
-    init_db()
-    print("Бот запущен!")
+    print("Бот запущен с Supabase!")
     asyncio.create_task(auto_summary_task())
     await dp.start_polling(bot)
 
