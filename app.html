@@ -660,32 +660,32 @@
 
     <div class="profile-row">
       <div class="profile-row-label">Пол</div>
-      <div class="profile-row-value" id="profileGender">—</div>
+      <div class="profile-row-value" id="profileGender" class="profile-row-value editable">—</div>
     </div>
 
     <div class="profile-row">
       <div class="profile-row-label">Возраст</div>
-      <div class="profile-row-value" id="profileAge">—</div>
+      <div class="profile-row-value" id="profileAge" class="profile-row-value editable">—</div>
     </div>
 
     <div class="profile-row">
       <div class="profile-row-label">Вес</div>
-      <div class="profile-row-value" id="profileWeight">—</div>
+      <div class="profile-row-value" id="profileWeight" class="profile-row-value editable">—</div>
     </div>
 
     <div class="profile-row">
       <div class="profile-row-label">Рост</div>
-      <div class="profile-row-value" id="profileHeight">—</div>
+      <div class="profile-row-value" id="profileHeight" class="profile-row-value editable">—</div>
     </div>
 
     <div class="profile-row">
       <div class="profile-row-label">Активность</div>
-      <div class="profile-row-value" id="profileActivity">—</div>
+      <div class="profile-row-value" id="profileActivity" class="profile-row-value editable">—</div>
     </div>
 
     <div class="profile-row">
       <div class="profile-row-label">Цель</div>
-      <div class="profile-row-value" id="profileGoal">—</div>
+      <div class="profile-row-value" id="profileGoal" class="profile-row-value editable">—</div>
     </div>
 
     <div class="profile-row">
@@ -705,7 +705,7 @@
 
     <div class="profile-row">
       <div class="profile-row-label">Вода</div>
-      <div class="profile-row-value" id="profileWaterGoal">—</div>
+      <div class="profile-row-value" id="profileWaterGoal" class="profile-row-value editable">—</div>
     </div>
 
     <button class="submit-btn" id="profileCloseBtn">Закрыть</button>
@@ -1092,6 +1092,178 @@ async function init() {
   });
 }
 
+
+
+async function updateUserSettings(updates) {
+  if (!userId) { alert('Не удалось определить пользователя'); return false; }
+  const { error } = await sb.from('user_settings').update(updates).eq('user_id', userId);
+  if (error) {
+    console.error('updateUserSettings error:', error);
+    alert('Не удалось сохранить профиль');
+    return false;
+  }
+  if (!userSettings) userSettings = {};
+  Object.assign(userSettings, updates);
+  return true;
+}
+
+async function editProfileField(field) {
+  if (!userSettings) return;
+  const cfg = {
+    gender: { label: 'Пол (male/female)', current: userSettings.gender || '' },
+    age: { label: 'Возраст', current: userSettings.age || '', numeric: true },
+    weight_kg: { label: 'Вес, кг', current: userSettings.weight_kg || '', numeric: true },
+    height_cm: { label: 'Рост, см', current: userSettings.height_cm || '', numeric: true },
+    activity: { label: 'Активность (light / medium / high)', current: userSettings.activity || '' },
+    goal: { label: 'Цель (lose / maintain / gain)', current: userSettings.goal || '' },
+    water_goal_ml: { label: 'Норма воды, мл', current: userSettings.water_goal_ml || '', numeric: true },
+  }[field];
+  if (!cfg) return;
+
+  const value = prompt(cfg.label, String(cfg.current));
+  if (value === null) return;
+  const trimmed = value.trim();
+  if (!trimmed) return;
+
+  let finalValue = trimmed;
+  if (cfg.numeric) {
+    finalValue = Number(trimmed.replace(',', '.'));
+    if (!Number.isFinite(finalValue) || finalValue <= 0) {
+      alert('Введите корректное число');
+      return;
+    }
+  }
+
+  const ok = await updateUserSettings({ [field]: finalValue });
+  if (ok) {
+    openProfile();
+    await renderAll();
+  }
+}
+
+async function loadWeightLog(start, end) {
+  if (!userId) return [];
+  let q = sb.from('weight_log').select('*').eq('user_id', userId).order('date');
+  if (start) q = q.gte('date', start);
+  if (end) q = q.lte('date', end);
+  const { data, error } = await q;
+  if (error) {
+    console.error('loadWeightLog error:', error);
+    return [];
+  }
+  return data || [];
+}
+
+function closeWeightSection() {
+  document.getElementById('content').style.display = '';
+  document.querySelector('.section-header').style.display = '';
+  document.querySelector('.section-tabs').style.display = '';
+  document.getElementById('summaryRow').style.display = '';
+  document.getElementById('weightSection').style.display = 'none';
+}
+
+async function openWeightSection() {
+  document.getElementById('content').style.display = 'none';
+  document.querySelector('.section-header').style.display = 'none';
+  document.querySelector('.section-tabs').style.display = 'none';
+  document.getElementById('summaryRow').style.display = 'none';
+  document.getElementById('weightSection').style.display = 'block';
+  document.getElementById('profileModal').classList.remove('open');
+  await renderWeightSection();
+}
+
+async function renderWeightSection() {
+  const entries = await loadWeightLog();
+  const chart = document.getElementById('weightChart');
+  const list = document.getElementById('weightLog');
+
+  if (!entries.length) {
+    chart.innerHTML = '<div class="empty-sub">Нет записей веса</div>';
+    list.innerHTML = '';
+    return;
+  }
+
+  const vals = entries.map(x => Number(x.weight));
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const range = Math.max(max - min, 1);
+  const width = 320, height = 160, pad = 18;
+  const pts = entries.map((e, i) => {
+    const x = pad + (entries.length === 1 ? (width - 2*pad)/2 : i * ((width - 2*pad) / (entries.length - 1)));
+    const y = height - pad - ((Number(e.weight) - min) / range) * (height - 2*pad);
+    return `${x},${y}`;
+  }).join(' ');
+
+  chart.innerHTML = `
+    <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+      <polyline fill="none" stroke="url(#g)" stroke-width="3" points="${pts}" />
+      ${entries.map((e, i) => {
+        const x = pad + (entries.length === 1 ? (width - 2*pad)/2 : i * ((width - 2*pad) / (entries.length - 1)));
+        const y = height - pad - ((Number(e.weight) - min) / range) * (height - 2*pad);
+        return `<circle cx="${x}" cy="${y}" r="4" fill="#7cffa4" />`;
+      }).join('')}
+      <defs>
+        <linearGradient id="g" x1="0" x2="1">
+          <stop offset="0%" stop-color="#7cffa4"/>
+          <stop offset="100%" stop-color="#4ef0ff"/>
+        </linearGradient>
+      </defs>
+    </svg>
+  `;
+
+  list.innerHTML = entries.slice().reverse().map((e, idx, arr) => {
+    const rev = entries.slice().reverse();
+    const next = rev[idx + 1];
+    const diff = next ? (Number(e.weight) - Number(next.weight)) : 0;
+    const diffHtml = next ? `<span class="weight-entry-diff ${diff > 0 ? 'up' : diff < 0 ? 'down' : ''}">${diff > 0 ? '+' : ''}${diff.toFixed(1)} кг</span>` : '';
+    return `
+      <div class="weight-entry">
+        <div>
+          <div class="weight-entry-date">${fmtDate(e.date)}</div>
+          <div class="meal-meta">${e.date}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <div class="weight-entry-val">${Number(e.weight).toFixed(1)} кг ${diffHtml}</div>
+          <button class="icon-btn edit" onclick="editWeightEntry(${e.id}, ${Number(e.weight)})">✏️</button>
+          <button class="icon-btn del" onclick="deleteWeightEntry(${e.id})">✕</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+async function addWeightEntry() {
+  const value = prompt('Вес, кг', userSettings?.weight_kg || '');
+  if (value === null) return;
+  const weight = Number(String(value).replace(',', '.'));
+  if (!Number.isFinite(weight) || weight <= 0) { alert('Введите корректный вес'); return; }
+  const date = today();
+  const { error } = await sb.from('weight_log').insert({ user_id: userId, date, weight });
+  if (error) { console.error('addWeightEntry error:', error); alert('Не удалось сохранить вес'); return; }
+  await updateUserSettings({ weight_kg: weight });
+  await renderWeightSection();
+  openProfile();
+}
+
+async function editWeightEntry(id, currentWeight) {
+  const value = prompt('Новый вес, кг', currentWeight);
+  if (value === null) return;
+  const weight = Number(String(value).replace(',', '.'));
+  if (!Number.isFinite(weight) || weight <= 0) { alert('Введите корректный вес'); return; }
+  const { error } = await sb.from('weight_log').update({ weight }).eq('id', id);
+  if (error) { console.error('editWeightEntry error:', error); alert('Не удалось обновить вес'); return; }
+  await updateUserSettings({ weight_kg: weight });
+  await renderWeightSection();
+  openProfile();
+}
+
+async function deleteWeightEntry(id) {
+  if (!confirm('Удалить запись веса?')) return;
+  const { error } = await sb.from('weight_log').delete().eq('id', id);
+  if (error) { console.error('deleteWeightEntry error:', error); alert('Не удалось удалить запись'); return; }
+  await renderWeightSection();
+}
+
 init();
 
 // ── Reminders UI / Profile UI ─────────────────────────────────────────────
@@ -1171,6 +1343,26 @@ function bindProfileAndReminderHandlers() {
     profileCloseBtn.addEventListener('click', () => {
       document.getElementById('profileModal').classList.remove('open');
     });
+  }
+
+  const profileFieldMap = {
+    profileGender: 'gender',
+    profileAge: 'age',
+    profileWeight: 'weight_kg',
+    profileHeight: 'height_cm',
+    profileActivity: 'activity',
+    profileGoal: 'goal',
+    profileWaterGoal: 'water_goal_ml',
+  };
+
+  Object.entries(profileFieldMap).forEach(([id, field]) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('click', () => editProfileField(field));
+  });
+
+  const openWeightLogBtn = document.getElementById('openWeightLogBtn');
+  if (openWeightLogBtn) {
+    openWeightLogBtn.addEventListener('click', openWeightSection);
   }
 
   const remWaterOn = document.getElementById('remWaterOn');
