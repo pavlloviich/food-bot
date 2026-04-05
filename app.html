@@ -1125,8 +1125,10 @@ async function renderWeightSection() {
     }
     return `<div class="weight-entry">
       <div class="weight-entry-date">${new Date(e.date + 'T00:00:00').toLocaleDateString('ru', {day:'numeric',month:'short'})}</div>
-      <div style="display:flex;align-items:center">
+      <div style="display:flex;align-items:center;gap:8px">
         <div class="weight-entry-val">${e.weight} кг</div>${diff}
+        <button class="icon-btn edit" onclick="editWeightEntry(${e.id}, ${e.weight}, '${e.date}')" style="width:26px;height:26px;font-size:12px">✏️</button>
+        <button class="icon-btn del" onclick="deleteWeightEntry(${e.id})" style="width:26px;height:26px;font-size:12px">✕</button>
       </div>
     </div>`;
   }).join('');
@@ -1138,6 +1140,22 @@ function openWeightSection() {
   document.getElementById('content').style.display = 'none';
   document.querySelector('.section-tabs').style.display = 'none';
   document.querySelector('.section-header').style.display = 'none';
+  renderWeightSection();
+}
+
+
+async function editWeightEntry(id, currentWeight, date) {
+  const val = prompt('Измени вес (кг):', currentWeight);
+  if (!val) return;
+  const w = parseFloat(val.replace(',', '.'));
+  if (isNaN(w) || w < 30 || w > 300) { alert('Некорректный вес'); return; }
+  await sb.from('weight_log').update({ weight: w }).eq('id', id);
+  renderWeightSection();
+}
+
+async function deleteWeightEntry(id) {
+  if (!confirm('Удалить эту запись?')) return;
+  await sb.from('weight_log').delete().eq('id', id);
   renderWeightSection();
 }
 
