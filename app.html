@@ -627,7 +627,7 @@
       </div>
     </div>
     <div class="form-group" id="portionRecalcBlock" style="display:none">
-      <label class="form-label">Пересчёт порции: записано г → съел г</label>
+      <label class="form-label" id="portionRecalcLabel">ПЕРЕСЧЁТ ПОРЦИИ (г)</label>
       <div style="display:grid;grid-template-columns:1fr 20px 1fr;gap:8px;align-items:center">
         <input type="number" class="form-input" id="portionFrom" placeholder="Было, г">
         <div style="text-align:center;color:var(--muted)">→</div>
@@ -1006,9 +1006,21 @@ function openEditMeal(id, food, cal, p, f, c, weightG) {
   document.getElementById('foodP').value    = p;
   document.getElementById('foodF').value    = f;
   document.getElementById('foodC').value    = c;
-  // Предзаполняем "Было" граммами от бота, если есть
-  document.getElementById('portionFrom').value = weightG || '';
-  document.getElementById('portionTo').value   = '';
+  document.getElementById('portionTo').value = '';
+
+  const fromEl    = document.getElementById('portionFrom');
+  const labelEl   = document.getElementById('portionRecalcLabel');
+
+  if (weightG) {
+    fromEl.value       = weightG;
+    fromEl.placeholder = 'Записано, г';
+    labelEl.textContent = 'ПЕРЕСЧЁТ ПОРЦИИ (г)';
+  } else {
+    fromEl.value       = '';
+    fromEl.placeholder = 'Записано г (неизв.)';
+    labelEl.textContent = 'ПЕРЕСЧЁТ ПОРЦИИ: введи записано г → съел г';
+  }
+
   document.getElementById('portionRecalcBlock').style.display = 'block';
   document.getElementById('mealModal').classList.add('open');
 }
