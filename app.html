@@ -627,7 +627,7 @@
       </div>
     </div>
     <div class="form-group" id="portionRecalcBlock" style="display:none">
-      <label class="form-label">Пересчёт по порции (г)</label>
+      <label class="form-label">Пересчёт порции: записано г → съел г</label>
       <div style="display:grid;grid-template-columns:1fr 20px 1fr;gap:8px;align-items:center">
         <input type="number" class="form-input" id="portionFrom" placeholder="Было, г">
         <div style="text-align:center;color:var(--muted)">→</div>
@@ -927,7 +927,7 @@ function renderMealsContent(meals) {
           <div class="meal-meta">${m.time} · 🔥${m.calories} · Б${(m.protein||0).toFixed(0)} Ж${(m.fat||0).toFixed(0)} У${(m.carbs||0).toFixed(0)}</div>
         </div>
         <div class="meal-actions">
-          <button class="icon-btn edit" onclick="openEditMeal(${m.id},'${m.food.replace(/'/g,"\\'")}',${m.calories},${m.protein||0},${m.fat||0},${m.carbs||0})" title="Редактировать">✏️</button>
+          <button class="icon-btn edit" onclick="openEditMeal(${m.id},'${m.food.replace(/'/g,"\\'")}',${m.calories},${m.protein||0},${m.fat||0},${m.carbs||0},${m.weight_g||'null'})" title="Редактировать">✏️</button>
           <button class="icon-btn del" onclick="deleteMeal(${m.id})" title="Удалить">✕</button>
         </div>
       </div>`;
@@ -998,7 +998,7 @@ async function renderAll() {
 }
 
 // ── Edit meal modal ────────────────────────────────────────────────────────────
-function openEditMeal(id, food, cal, p, f, c) {
+function openEditMeal(id, food, cal, p, f, c, weightG) {
   document.getElementById('mealModalTitle').textContent = 'Редактировать блюдо';
   document.getElementById('editMealId').value = id;
   document.getElementById('foodName').value = food;
@@ -1006,7 +1006,8 @@ function openEditMeal(id, food, cal, p, f, c) {
   document.getElementById('foodP').value    = p;
   document.getElementById('foodF').value    = f;
   document.getElementById('foodC').value    = c;
-  document.getElementById('portionFrom').value = '';
+  // Предзаполняем "Было" граммами от бота, если есть
+  document.getElementById('portionFrom').value = weightG || '';
   document.getElementById('portionTo').value   = '';
   document.getElementById('portionRecalcBlock').style.display = 'block';
   document.getElementById('mealModal').classList.add('open');
