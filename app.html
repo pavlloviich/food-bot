@@ -633,7 +633,7 @@
 <!-- Water modal -->
 <div class="modal-overlay" id="waterModal">
   <div class="modal">
-    <div class="modal-title">Добавить воду</div>
+    <div class="modal-title" id="waterModalTitle">Добавить воду</div>
     <div class="form-group">
       <label class="form-label">Количество (мл)</label>
       <input type="number" class="form-input" id="waterMl" placeholder="250">
@@ -677,6 +677,11 @@
     <div class="profile-row">
       <div class="profile-row-label">💧 Норма воды</div>
       <div class="profile-row-value editable" id="profileWaterGoal" onclick="editWaterGoal()">— мл</div>
+    </div>
+
+    <div class="profile-row" style="cursor:pointer" id="openWeightLogBtn">
+      <div class="profile-row-label">📈 Динамика веса</div>
+      <div class="profile-row-value" style="color:var(--accent)">→</div>
     </div>
 
     <button class="submit-btn" id="profileCloseBtn">Закрыть</button>
@@ -751,8 +756,20 @@ let userSettings   = null;
 let customStart    = null;
 let customEnd      = null;
 
-function today()    { return new Date().toISOString().split('T')[0]; }
-function daysAgo(n) { const d=new Date(); d.setDate(d.getDate()-n); return d.toISOString().split('T')[0]; }
+function localNow() {
+  const offsetMin = (userSettings?.timezone_offset ?? 0) * 60;
+  return new Date(Date.now() + offsetMin * 60000);
+}
+
+function today()    {
+  const d = localNow();
+  return d.toISOString().slice(0,10);
+}
+function daysAgo(n) {
+  const d = localNow();
+  d.setDate(d.getDate()-n);
+  return d.toISOString().slice(0,10);
+}
 function fmtDate(s) { return new Date(s+'T00:00:00').toLocaleDateString('ru',{day:'numeric',month:'short'}); }
 
 function getPeriodDates() {
@@ -813,26 +830,40 @@ async function loadBurned(start,end) {
 async function deleteMeal(id)  { await sb.from('meals').delete().eq('id',id); renderAll(); }
 async function deleteWater(id) { await sb.from('water').delete().eq('id',id); renderAll(); }
 
+async function updateWater(id, ml) {
+  await sb.from('water').update({ amount_ml: ml }).eq('id', id);
+  renderAll();
+}
+
+let editingWaterId = null;
+
+function openEditWater(id, currentMl) {
+  editingWaterId = id;
+  document.getElementById('waterMl').value = currentMl;
+  document.getElementById('waterModalTitle').textContent = 'Редактировать воду';
+  document.getElementById('waterModal').classList.add('open');
+}
+
 async function updateMeal(id, food, calories, protein, fat, carbs) {
   await sb.from('meals').update({food,calories,protein:protein||0,fat:fat||0,carbs:carbs||0}).eq('id',id);
   renderAll();
 }
 
 async function addMeal(food, calories, protein, fat, carbs) {
-  const now = new Date();
+  const now = localNow();
   await sb.from('meals').insert({
-    user_id:userId, date:now.toISOString().split('T')[0],
-    time:now.toTimeString().slice(0,5),
+    user_id:userId, date:now.toISOString().slice(0,10),
+    time:now.toISOString().slice(11,16),
     food,calories,protein:protein||0,fat:fat||0,carbs:carbs||0
   });
   renderAll();
 }
 
 async function addWater(ml) {
-  const now = new Date();
+  const now = localNow();
   await sb.from('water').insert({
-    user_id:userId, date:now.toISOString().split('T')[0],
-    time:now.toTimeString().slice(0,5), amount_ml:ml
+    user_id:userId, date:now.toISOString().slice(0,10),
+    time:now.toISOString().slice(11,16), amount_ml:ml
   });
   renderAll();
 }
@@ -923,7 +954,10 @@ function renderWaterContent(entries) {
           <div class="water-ml">${w.amount_ml} мл</div>
           <div class="meal-meta">${w.time}</div>
         </div>
-        <button class="icon-btn del" onclick="deleteWater(${w.id})" title="Удалить">✕</button>
+        <div class="meal-actions">
+          <button class="icon-btn edit" onclick="openEditWater(${w.id}, ${w.amount_ml})" title="Редактировать">✏️</button>
+          <button class="icon-btn del" onclick="deleteWater(${w.id})" title="Удалить">✕</button>
+        </div>
       </div>`;
   }
 
@@ -970,10 +1004,10 @@ function setWaterMl(ml) { document.getElementById('waterMl').value = ml; }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function init() {
-  document.getElementById('dateLabel').textContent = new Date().toLocaleDateString('ru',{day:'numeric',month:'long'});
   document.getElementById('content').innerHTML = `<div class="loading"><div class="spinner"></div></div>`;
 
   userSettings = await loadSettings();
+  document.getElementById('dateLabel').textContent = localNow().toLocaleDateString('ru',{day:'numeric',month:'long'});
   await renderAll();
 
   // Period tabs
@@ -1018,7 +1052,9 @@ async function init() {
       document.getElementById('foodC').value    = '';
       document.getElementById('mealModal').classList.add('open');
     } else {
+      editingWaterId = null;
       document.getElementById('waterMl').value = '';
+      document.getElementById('waterModalTitle').textContent = 'Добавить воду';
       document.getElementById('waterModal').classList.add('open');
     }
   });
@@ -1057,7 +1093,12 @@ async function init() {
     const ml = parseInt(document.getElementById('waterMl').value);
     if (!ml||ml<1) { alert('Введи количество мл'); return; }
     document.getElementById('waterSubmitBtn').textContent = 'Сохраняю...';
-    await addWater(ml);
+    if (editingWaterId) {
+      await updateWater(editingWaterId, ml);
+      editingWaterId = null;
+    } else {
+      await addWater(ml);
+    }
     document.getElementById('waterModal').classList.remove('open');
     document.getElementById('waterSubmitBtn').textContent = 'Сохранить';
   });
