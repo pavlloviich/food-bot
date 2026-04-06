@@ -563,6 +563,24 @@
     background: rgba(124,255,164,0.1);
   }
 
+  .quick-mult-btn {
+    padding: 8px 4px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    font-family: 'DM Sans', sans-serif;
+    transition: all 0.15s;
+  }
+  .quick-mult-btn:active {
+    background: var(--accent);
+    color: #000;
+    transform: scale(0.95);
+  }
+
 </style>
 </head>
 <body>
@@ -627,13 +645,23 @@
       </div>
     </div>
     <div class="form-group" id="portionRecalcBlock" style="display:none">
-      <label class="form-label" id="portionRecalcLabel">ПЕРЕСЧЁТ ПОРЦИИ (г)</label>
-      <div style="display:grid;grid-template-columns:1fr 20px 1fr;gap:8px;align-items:center">
-        <input type="number" class="form-input" id="portionFrom" placeholder="Было, г">
-        <div style="text-align:center;color:var(--muted)">→</div>
-        <input type="number" class="form-input" id="portionTo" placeholder="Стало, г">
+      <label class="form-label">Изменить порцию</label>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:10px">
+        <button type="button" class="quick-mult-btn" onclick="scaleByK(0.5)">×0.5</button>
+        <button type="button" class="quick-mult-btn" onclick="scaleByK(0.75)">×¾</button>
+        <button type="button" class="quick-mult-btn" onclick="scaleByK(1.25)">×1.25</button>
+        <button type="button" class="quick-mult-btn" onclick="scaleByK(1.5)">×1.5</button>
+        <button type="button" class="quick-mult-btn" onclick="scaleByK(2)">×2</button>
       </div>
-      <button type="button" style="margin-top:8px;width:100%;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:12px;color:var(--accent);font-size:13px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif" onclick="applyPortionRecalc()">Пересчитать</button>
+      <div id="gramRowBlock">
+        <label class="form-label" style="margin-bottom:6px">Или точно по граммам</label>
+        <div style="display:grid;grid-template-columns:1fr 20px 1fr 80px;gap:6px;align-items:center">
+          <input type="number" class="form-input" id="portionFrom" placeholder="Было, г">
+          <div style="text-align:center;color:var(--muted)">→</div>
+          <input type="number" class="form-input" id="portionTo" placeholder="Стало, г">
+          <button type="button" class="quick-mult-btn" style="height:44px" onclick="scaleByGrams()">→</button>
+        </div>
+      </div>
     </div>
     <button class="submit-btn" id="mealSubmitBtn">Сохранить</button>
   </div>
@@ -830,16 +858,25 @@ async function loadWaterEntries(start,end) {
   return data||[];
 }
 
-async function loadBurned(start,end) {
-  if (!userId) return 0;
-  const {data} = await sb.from('burned').select('calories').eq('user_id',userId).gte('date',start).lte('date',end);
-  return (data||[]).reduce((s,r)=>s+r.calories,0);
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
-async function deleteMeal(id)  { await sb.from('meals').delete().eq('id',id); await renderAll(); }
-async function deleteWater(id) { await sb.from('water').delete().eq('id',id); await renderAll(); }
+async function deleteMeal(id) {
+  if (!userId) return;
+  if (!confirm('Удалить запись?')) return;
+  await sb.from('meals').delete().eq('id',id);
+  await renderAll();
+}
+async function deleteWater(id) {
+  if (!userId) return;
+  if (!confirm('Удалить запись?')) return;
+  await sb.from('water').delete().eq('id',id);
+  await renderAll();
+}
 
 async function updateWater(id, ml) {
+  if (!userId) return;
   await sb.from('water').update({ amount_ml: ml }).eq('id', id);
   await renderAll();
 }
@@ -854,6 +891,7 @@ function openEditWater(id, currentMl) {
 }
 
 async function updateMeal(id, food, calories, protein, fat, carbs, weightG) {
+  if (!userId) return;
   const upd = {food, calories, protein:protein||0, fat:fat||0, carbs:carbs||0};
   if (weightG) upd.weight_g = weightG;
   await sb.from('meals').update(upd).eq('id', id);
@@ -861,6 +899,7 @@ async function updateMeal(id, food, calories, protein, fat, carbs, weightG) {
 }
 
 async function addMeal(food, calories, protein, fat, carbs) {
+  if (!userId) return;
   const now = localNow();
   await sb.from('meals').insert({
     user_id:userId, date:now.toISOString().slice(0,10),
@@ -871,6 +910,7 @@ async function addMeal(food, calories, protein, fat, carbs) {
 }
 
 async function addWater(ml) {
+  if (!userId) return;
   const now = localNow();
   await sb.from('water').insert({
     user_id:userId, date:now.toISOString().slice(0,10),
@@ -880,7 +920,7 @@ async function addWater(ml) {
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
-function renderSummary(meals, waterEntries, burnedCal, settings) {
+function renderSummary(meals, waterEntries, settings) {
   const totalCal  = meals.reduce((s,m)=>s+m.calories,0);
   const waterMl   = waterEntries.reduce((s,w)=>s+w.amount_ml,0);
   const calGoal   = settings?.calories_goal||2000;
@@ -899,17 +939,6 @@ function renderSummary(meals, waterEntries, burnedCal, settings) {
       <div class="card-value">${waterMl}<span class="card-unit"> / ${waterGoal} мл</span></div>
       <div class="card-bar"><div class="card-bar-fill" style="width:${waterPct*100}%;background:linear-gradient(90deg,#4ef0ff,#7cffa4)"></div></div>
     </div>
-    ${burnedCal ? `
-    <div class="summary-card">
-      <div class="card-label">Сожжено</div>
-      <div class="card-value">${burnedCal}<span class="card-unit"> ккал</span></div>
-    </div>
-    <div class="summary-card">
-      <div class="card-label">Баланс</div>
-      <div class="card-value" style="color:${burnedCal-totalCal>0?'var(--accent)':'var(--danger)'}">
-        ${burnedCal-totalCal>0?'+':''}${burnedCal-totalCal}
-      </div>
-    </div>` : ''}
   `;
 }
 
@@ -921,15 +950,17 @@ function renderMealsContent(meals) {
   }
 
   function mealCard(m) {
+    const safeFood = escHtml(m.food);
+    const safeOnclick = m.food.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
     return `
       <div class="meal-card">
         <div class="meal-icon">${foodEmoji(m.food)}</div>
         <div class="meal-info">
-          <div class="meal-name">${m.food}</div>
+          <div class="meal-name">${safeFood}</div>
           <div class="meal-meta">${m.time} · 🔥${m.calories} · Б${(m.protein||0).toFixed(0)} Ж${(m.fat||0).toFixed(0)} У${(m.carbs||0).toFixed(0)}</div>
         </div>
         <div class="meal-actions">
-          <button class="icon-btn edit" onclick="openEditMeal(${m.id},'${m.food.replace(/'/g,"\\'")}',${m.calories},${m.protein||0},${m.fat||0},${m.carbs||0},${m.weight_g||'null'})" title="Редактировать">✏️</button>
+          <button class="icon-btn edit" onclick="openEditMeal(${m.id},'${safeOnclick}',${m.calories},${m.protein||0},${m.fat||0},${m.carbs||0},${m.weight_g||'null'})" title="Редактировать">✏️</button>
           <button class="icon-btn del" onclick="deleteMeal(${m.id})" title="Удалить">✕</button>
         </div>
       </div>`;
@@ -989,54 +1020,64 @@ function renderWaterContent(entries) {
 
 async function renderAll() {
   const {start,end} = getPeriodDates();
-  const [meals, waterEntries, burnedCal] = await Promise.all([
+  const [meals, waterEntries] = await Promise.all([
     loadMeals(start,end),
     loadWaterEntries(start,end),
-    loadBurned(start,end),
   ]);
-  renderSummary(meals, waterEntries, burnedCal, userSettings);
+  renderSummary(meals, waterEntries, userSettings);
   if (currentSection==='meals') renderMealsContent(meals);
   else renderWaterContent(waterEntries);
 }
 
-// ── Edit meal modal ────────────────────────────────────────────────────────────
+// ── Edit meal modal ───────────────────────────────────────────────────────────
+// Базовые значения из базы — только для пересчёта порции
+let _base = { cal: 0, p: 0, f: 0, c: 0, g: null };
+
 function openEditMeal(id, food, cal, p, f, c, weightG) {
+  // Заполняем поля
   document.getElementById('mealModalTitle').textContent = 'Редактировать блюдо';
   document.getElementById('editMealId').value = id;
-  document.getElementById('foodName').value = food;
-  document.getElementById('foodCal').value  = cal;
-  document.getElementById('foodP').value    = p;
-  document.getElementById('foodF').value    = f;
-  document.getElementById('foodC').value    = c;
-  document.getElementById('portionTo').value = '';
+  document.getElementById('foodName').value   = food;
+  document.getElementById('foodCal').value    = cal;
+  document.getElementById('foodP').value      = p;
+  document.getElementById('foodF').value      = f;
+  document.getElementById('foodC').value      = c;
 
-  const fromEl    = document.getElementById('portionFrom');
-  const labelEl   = document.getElementById('portionRecalcLabel');
+  // Сохраняем базу для пересчёта — неизменна до закрытия модалки
+  _base = { cal, p, f, c, g: weightG || null };
 
-  if (weightG) {
-    fromEl.value       = weightG;
-    fromEl.placeholder = 'Записано, г';
-    labelEl.textContent = 'ПЕРЕСЧЁТ ПОРЦИИ (г)';
-  } else {
-    fromEl.value       = '';
-    fromEl.placeholder = 'Записано г (неизв.)';
-    labelEl.textContent = 'ПЕРЕСЧЁТ ПОРЦИИ: введи записано г → съел г';
-  }
+  // Граммовые поля
+  document.getElementById('portionFrom').value = weightG || '';
+  document.getElementById('portionTo').value   = '';
 
   document.getElementById('portionRecalcBlock').style.display = 'block';
   document.getElementById('mealModal').classList.add('open');
 }
 
-function applyPortionRecalc() {
+// Применить коэффициент k к полям КБЖУ — считаем всегда от _base
+function scaleByK(k) {
+  document.getElementById('foodCal').value = Math.round(_base.cal * k);
+  document.getElementById('foodP').value   = Math.round(_base.p * k * 10) / 10;
+  document.getElementById('foodF').value   = Math.round(_base.f * k * 10) / 10;
+  document.getElementById('foodC').value   = Math.round(_base.c * k * 10) / 10;
+  // portionFrom не трогаем — пусть пользователь видит исходные граммы
+}
+
+// Пересчёт по граммам: читаем "Было" и "Стало", вычисляем k
+function scaleByGrams() {
   const from = parseFloat(document.getElementById('portionFrom').value);
   const to   = parseFloat(document.getElementById('portionTo').value);
   if (!from || !to || from <= 0 || to <= 0) { alert('Введи обе граммовки'); return; }
   const k = to / from;
-  const scale = v => Math.round(parseFloat(v) * k * 10) / 10;
-  document.getElementById('foodCal').value = Math.round(parseFloat(document.getElementById('foodCal').value) * k);
-  document.getElementById('foodP').value   = scale(document.getElementById('foodP').value);
-  document.getElementById('foodF').value   = scale(document.getElementById('foodF').value);
-  document.getElementById('foodC').value   = scale(document.getElementById('foodC').value);
+  scaleByK(k);
+  // Обновляем _base — следующий пересчёт по граммам будет от новых значений
+  _base = {
+    cal: Math.round(_base.cal * k),
+    p:   Math.round(_base.p * k * 10) / 10,
+    f:   Math.round(_base.f * k * 10) / 10,
+    c:   Math.round(_base.c * k * 10) / 10,
+    g:   to,
+  };
   document.getElementById('portionFrom').value = to;
   document.getElementById('portionTo').value   = '';
 }
@@ -1117,33 +1158,46 @@ async function init() {
     const c    = parseFloat(document.getElementById('foodC').value)||0;
     if (!food||!cal) { alert('Заполни название и калории'); return; }
 
-    const editId = document.getElementById('editMealId').value;
-    document.getElementById('mealSubmitBtn').textContent = 'Сохраняю...';
+    const btn = document.getElementById('mealSubmitBtn');
+    btn.textContent = 'Сохраняю...';
+    btn.disabled = true;
 
-    if (editId) {
-      const newWeightG = parseFloat(document.getElementById('portionFrom').value) || null;
-      await updateMeal(parseInt(editId), food, cal, p, f, c, newWeightG);
-    } else {
-      await addMeal(food, cal, p, f, c);
+    try {
+      const editId = document.getElementById('editMealId').value;
+      if (editId) {
+        const newWeightG = parseFloat(document.getElementById('portionFrom').value) || null;
+        await updateMeal(parseInt(editId), food, cal, p, f, c, newWeightG);
+      } else {
+        await addMeal(food, cal, p, f, c);
+      }
+      document.getElementById('mealModal').classList.remove('open');
+    } finally {
+      btn.textContent = 'Сохранить';
+      btn.disabled = false;
     }
-
-    document.getElementById('mealModal').classList.remove('open');
-    document.getElementById('mealSubmitBtn').textContent = 'Сохранить';
   });
 
   // Water submit
   document.getElementById('waterSubmitBtn').addEventListener('click', async () => {
     const ml = parseInt(document.getElementById('waterMl').value);
     if (!ml||ml<1) { alert('Введи количество мл'); return; }
-    document.getElementById('waterSubmitBtn').textContent = 'Сохраняю...';
-    if (editingWaterId) {
-      await updateWater(editingWaterId, ml);
-      editingWaterId = null;
-    } else {
-      await addWater(ml);
+
+    const btn = document.getElementById('waterSubmitBtn');
+    btn.textContent = 'Сохраняю...';
+    btn.disabled = true;
+
+    try {
+      if (editingWaterId) {
+        await updateWater(editingWaterId, ml);
+        editingWaterId = null;
+      } else {
+        await addWater(ml);
+      }
+      document.getElementById('waterModal').classList.remove('open');
+    } finally {
+      btn.textContent = 'Сохранить';
+      btn.disabled = false;
     }
-    document.getElementById('waterModal').classList.remove('open');
-    document.getElementById('waterSubmitBtn').textContent = 'Сохранить';
   });
 }
 
@@ -1162,50 +1216,11 @@ async function updateUserSettings(updates) {
   return true;
 }
 
-async function editProfileField(field) {
-  if (!userSettings) return;
-  const cfg = {
-    gender: { label: 'Пол (male/female)', current: userSettings.gender || '' },
-    age: { label: 'Возраст', current: userSettings.age || '', numeric: true },
-    weight_kg: { label: 'Вес, кг', current: userSettings.weight_kg || '', numeric: true },
-    height_cm: { label: 'Рост, см', current: userSettings.height_cm || '', numeric: true },
-    activity: { label: 'Активность (light / medium / high)', current: userSettings.activity || '' },
-    goal: { label: 'Цель (lose / maintain / gain)', current: userSettings.goal || '' },
-    water_goal_ml: { label: 'Норма воды, мл', current: userSettings.water_goal_ml || '', numeric: true },
-  }[field];
-  if (!cfg) return;
 
-  const value = prompt(cfg.label, String(cfg.current));
-  if (value === null) return;
-  const trimmed = value.trim();
-  if (!trimmed) return;
-
-  let finalValue = trimmed;
-  if (cfg.numeric) {
-    finalValue = Number(trimmed.replace(',', '.'));
-    if (!Number.isFinite(finalValue) || finalValue <= 0) {
-      alert('Введите корректное число');
-      return;
-    }
-  }
-
-  const ok = await updateUserSettings({ [field]: finalValue });
-  if (ok) {
-    openProfile();
-    await renderAll();
-  }
-}
-
-async function loadWeightLog(start, end) {
+async function loadWeightLog() {
   if (!userId) return [];
-  let q = sb.from('weight_log').select('*').eq('user_id', userId).order('date');
-  if (start) q = q.gte('date', start);
-  if (end) q = q.lte('date', end);
-  const { data, error } = await q;
-  if (error) {
-    console.error('loadWeightLog error:', error);
-    return [];
-  }
+  const { data, error } = await sb.from('weight_log').select('*').eq('user_id', userId).order('date');
+  if (error) { console.error('loadWeightLog error:', error); return []; }
   return data || [];
 }
 
@@ -1266,9 +1281,9 @@ async function renderWeightSection() {
     </svg>
   `;
 
-  list.innerHTML = entries.slice().reverse().map((e, idx, arr) => {
-    const rev = entries.slice().reverse();
-    const next = rev[idx + 1];
+  const reversed = entries.slice().reverse();
+  list.innerHTML = reversed.map((e, idx) => {
+    const next = reversed[idx + 1];
     const diff = next ? (Number(e.weight) - Number(next.weight)) : 0;
     const diffHtml = next ? `<span class="weight-entry-diff ${diff > 0 ? 'up' : diff < 0 ? 'down' : ''}">${diff > 0 ? '+' : ''}${diff.toFixed(1)} кг</span>` : '';
     return `
@@ -1288,6 +1303,7 @@ async function renderWeightSection() {
 }
 
 async function addWeightEntry() {
+  if (!userId) return;
   const value = prompt('Вес, кг', userSettings?.weight_kg || '');
   if (value === null) return;
   const weight = Number(String(value).replace(',', '.'));
@@ -1297,10 +1313,10 @@ async function addWeightEntry() {
   if (error) { console.error('addWeightEntry error:', error); alert('Не удалось сохранить вес'); return; }
   await updateUserSettings({ weight_kg: weight });
   await renderWeightSection();
-  openProfile();
 }
 
 async function editWeightEntry(id, currentWeight) {
+  if (!userId) return;
   const value = prompt('Новый вес, кг', currentWeight);
   if (value === null) return;
   const weight = Number(String(value).replace(',', '.'));
@@ -1309,10 +1325,10 @@ async function editWeightEntry(id, currentWeight) {
   if (error) { console.error('editWeightEntry error:', error); alert('Не удалось обновить вес'); return; }
   await updateUserSettings({ weight_kg: weight });
   await renderWeightSection();
-  openProfile();
 }
 
 async function deleteWeightEntry(id) {
+  if (!userId) return;
   if (!confirm('Удалить запись веса?')) return;
   const { error } = await sb.from('weight_log').delete().eq('id', id);
   if (error) { console.error('deleteWeightEntry error:', error); alert('Не удалось удалить запись'); return; }
@@ -1346,7 +1362,8 @@ function openProfile() {
 }
 
 async function editWeight() {
-  const cur = userSettings?.weight_kg || '';
+  if (!userId || !userSettings) return;
+  const cur = userSettings.weight_kg || '';
   const val = prompt('Введи вес (кг):', cur);
   if (!val) return;
   const w = parseFloat(String(val).replace(',', '.'));
@@ -1358,6 +1375,7 @@ async function editWeight() {
 }
 
 async function setGoal(goal) {
+  if (!userId || !userSettings) return;
   const goalMap = {
     lose:     userSettings.calories_deficit || ((userSettings.calories_goal || 2000) - 500),
     maintain: userSettings.calories_goal    || 2000,
@@ -1376,7 +1394,8 @@ async function setGoal(goal) {
 }
 
 async function editCalGoal() {
-  const cur = userSettings?.calories_goal || 2000;
+  if (!userId || !userSettings) return;
+  const cur = userSettings.calories_goal || 2000;
   const val = prompt('Введи норму калорий:', cur);
   if (!val) return;
   const cal = parseInt(val, 10);
@@ -1389,7 +1408,8 @@ async function editCalGoal() {
 }
 
 async function editWaterGoal() {
-  const cur = userSettings?.water_goal_ml || 2500;
+  if (!userId || !userSettings) return;
+  const cur = userSettings.water_goal_ml || 2500;
   const val = prompt('Введи норму воды (мл):', cur);
   if (!val) return;
   const ml = parseInt(val, 10);
@@ -1448,21 +1468,6 @@ function bindProfileAndReminderHandlers() {
       document.getElementById('profileModal').classList.remove('open');
     });
   }
-
-  const profileFieldMap = {
-    profileGender: 'gender',
-    profileAge: 'age',
-    profileWeight: 'weight_kg',
-    profileHeight: 'height_cm',
-    profileActivity: 'activity',
-    profileGoal: 'goal',
-    profileWaterGoal: 'water_goal_ml',
-  };
-
-  Object.entries(profileFieldMap).forEach(([id, field]) => {
-    const el = document.getElementById(id);
-    if (el) el.addEventListener('click', () => editProfileField(field));
-  });
 
   const openWeightLogBtn = document.getElementById('openWeightLogBtn');
   if (openWeightLogBtn) {
