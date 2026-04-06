@@ -1024,13 +1024,13 @@ async def cmd_reminders_edit(message, uid):
 
 # ── Умные напоминания ─────────────────────────────────────────────────────────
 
-def has_meals_since(user_id, since_hour, tz_offset):
+def has_meals_in_window(user_id, from_hour, to_hour):
+    """Есть ли записи еды в диапазоне часов (время в базе — локальное время пользователя)"""
     today = date.today().strftime("%Y-%m-%d")
     r = sb.table("meals").select("time").eq("user_id", user_id).eq("date", today).execute()
-    meals = r.data or []
-    for m in meals:
-        meal_hour = int(m["time"].split(":")[0])
-        if meal_hour >= since_hour:
+    for m in (r.data or []):
+        h = int(m["time"].split(":")[0])
+        if from_hour <= h <= to_hour:
             return True
     return False
 
@@ -1059,45 +1059,53 @@ async def smart_reminders_task():
                 if local_m > 5:
                     continue
 
+                # Не беспокоим ночью (с 23 до 7 по местному времени)
+                if local_h >= 23 or local_h < 7:
+                    continue
+
+                # Завтрак
                 if get_setting(uid, 'remind_breakfast_enabled'):
                     bt = get_setting(uid, 'remind_breakfast_time') or '09:00'
                     bh = int(bt.split(':')[0])
                     remind_h = (bh + 1) % 24
                     key = (uid, 'breakfast', today)
                     if local_h == remind_h and key not in REMINDER_SENT:
-                        if not has_meals_since(uid, bh - 1, tz):
+                        if not has_meals_in_window(uid, max(bh - 1, 0), bh + 1):
                             try:
                                 await bot.send_message(uid, "🌅 Как прошёл завтрак? Не забудь записать! 🍳")
                                 REMINDER_SENT[key] = today
                             except: pass
 
+                # Обед
                 if get_setting(uid, 'remind_lunch_enabled'):
                     lt = get_setting(uid, 'remind_lunch_time') or '13:00'
                     lh = int(lt.split(':')[0])
                     remind_h = (lh + 1) % 24
                     key = (uid, 'lunch', today)
                     if local_h == remind_h and key not in REMINDER_SENT:
-                        if not has_meals_since(uid, lh - 1, tz):
+                        if not has_meals_in_window(uid, max(lh - 1, 0), lh + 1):
                             try:
                                 await bot.send_message(uid, "☀️ Как прошёл обед? Запиши что ел 🍱")
                                 REMINDER_SENT[key] = today
                             except: pass
 
+                # Ужин
                 if get_setting(uid, 'remind_dinner_enabled'):
                     dt = get_setting(uid, 'remind_dinner_time') or '19:00'
                     dh = int(dt.split(':')[0])
                     remind_h = (dh + 1) % 24
                     key = (uid, 'dinner', today)
                     if local_h == remind_h and key not in REMINDER_SENT:
-                        if not has_meals_since(uid, dh - 1, tz):
+                        if not has_meals_in_window(uid, max(dh - 1, 0), dh + 1):
                             try:
                                 await bot.send_message(uid, "🌆 Как прошёл ужин? Запиши что ел 🍽")
                                 REMINDER_SENT[key] = today
                             except: pass
 
-                if get_setting(uid, 'remind_water_enabled'):
+                # Вода — только с 8 до 21 по местному времени
+                if get_setting(uid, 'remind_water_enabled') and 8 <= local_h <= 21:
                     interval = get_setting(uid, 'remind_water_interval') or 2
-                    if 8 <= local_h <= 22 and local_h % interval == 0:
+                    if local_h % interval == 0:
                         key = (uid, f'water_{local_h}', today)
                         if key not in REMINDER_SENT:
                             water = get_today_water(uid)
