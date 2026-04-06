@@ -148,8 +148,14 @@ def set_settings_bulk(user_id, data):
 
 # ── ИЗМЕНЕНИЕ: save_meal теперь принимает и сохраняет weight_g ───────────────
 
+def get_local_now(user_id):
+    """Текущее локальное время пользователя с учётом его timezone_offset"""
+    tz = get_setting(user_id, "timezone_offset") or 0
+    from datetime import timezone, timedelta
+    return datetime.now(timezone.utc) + timedelta(hours=tz)
+
 def save_meal(user_id, food, calories, protein=0, fat=0, carbs=0, weight_g=None):
-    now = datetime.now()
+    now = get_local_now(user_id)
     row = {
         "user_id":  user_id,
         "date":     now.strftime("%Y-%m-%d"),
@@ -165,19 +171,26 @@ def save_meal(user_id, food, calories, protein=0, fat=0, carbs=0, weight_g=None)
     sb.table("meals").insert(row).execute()
 
 def save_water(user_id, ml):
-    now = datetime.now()
+    now = get_local_now(user_id)
     sb.table("water").insert({
-        "user_id": user_id, "date": now.strftime("%Y-%m-%d"),
-        "time": now.strftime("%H:%M"), "amount_ml": ml
+        "user_id":   user_id,
+        "date":      now.strftime("%Y-%m-%d"),
+        "time":      now.strftime("%H:%M"),
+        "amount_ml": ml
     }).execute()
 
+def get_local_today(user_id):
+    tz = get_setting(user_id, "timezone_offset") or 0
+    from datetime import timezone, timedelta
+    return (datetime.now(timezone.utc) + timedelta(hours=tz)).strftime("%Y-%m-%d")
+
 def get_today_meals(user_id):
-    today = date.today().strftime("%Y-%m-%d")
+    today = get_local_today(user_id)
     r = sb.table("meals").select("*").eq("user_id", user_id).eq("date", today).order("time").execute()
     return r.data or []
 
 def get_today_water(user_id):
-    today = date.today().strftime("%Y-%m-%d")
+    today = get_local_today(user_id)
     r = sb.table("water").select("amount_ml").eq("user_id", user_id).eq("date", today).execute()
     return sum(row["amount_ml"] for row in (r.data or []))
 
@@ -768,9 +781,11 @@ async def cmd_month(msg: Message):
 
 @dp.callback_query(F.data.startswith("period_"))
 async def cb_period(call: CallbackQuery):
-    from datetime import timedelta
+    from datetime import timedelta, timezone
+    uid    = call.from_user.id
+    tz     = get_setting(uid, "timezone_offset") or 0
     period = call.data.split("_")[1]
-    t      = date.today()
+    t      = (datetime.now(timezone.utc) + timedelta(hours=tz)).date()
     start  = t if period=="today" else t-timedelta(days=6 if period=="7" else 29)
     r = sb.table("meals").select("*").eq("user_id", call.from_user.id)\
         .gte("date", start.strftime("%Y-%m-%d")).lte("date", t.strftime("%Y-%m-%d"))\
@@ -799,7 +814,7 @@ async def cb_period(call: CallbackQuery):
 @dp.message(Command("clear"))
 async def cmd_clear(msg: Message):
     if get_access_status(msg.from_user.id) != 'granted': return
-    today = date.today().strftime("%Y-%m-%d")
+    today = get_local_today(msg.from_user.id)
     sb.table("meals").delete().eq("user_id", msg.from_user.id).eq("date", today).execute()
     sb.table("water").delete().eq("user_id", msg.from_user.id).eq("date", today).execute()
     await msg.answer("🗑 Дневник за сегодня очищен.")
@@ -1026,7 +1041,7 @@ async def cmd_reminders_edit(message, uid):
 
 def has_meals_in_window(user_id, from_hour, to_hour):
     """Есть ли записи еды в диапазоне часов (время в базе — локальное время пользователя)"""
-    today = date.today().strftime("%Y-%m-%d")
+    today = get_local_today(user_id)
     r = sb.table("meals").select("time").eq("user_id", user_id).eq("date", today).execute()
     for m in (r.data or []):
         h = int(m["time"].split(":")[0])
