@@ -385,21 +385,24 @@ async def analyze_text(user_id, text):
     return json.loads(resp.choices[0].message.content)
 
 
-async def analyze_image(user_id, image_bytes):
+async def analyze_image(user_id, image_bytes, caption=None):
     prompt = build_system_prompt(user_id)
     b64  = base64.b64encode(image_bytes).decode()
+    user_text = (
+        "Определи блюдо и его КБЖУ. "
+        "Обрати внимание на: тип посуды и её стандартный объём, "
+        "степень заполнения тарелки, видимую плотность и объём еды, "
+        "любые визуальные подсказки о размере порции."
+    )
+    if caption:
+        user_text += f"\n\nПодпись от пользователя: «{caption}» — используй как дополнительный контекст о блюде и порции."
     resp = await client.chat.completions.create(
         model="gpt-4o-mini", response_format={"type": "json_object"},
         messages=[
             {"role": "system", "content": prompt},
             {"role": "user", "content": [
                 {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-                {"type": "text", "text": (
-                    "Определи блюдо и его КБЖУ. "
-                    "Обрати внимание на: тип посуды и её стандартный объём, "
-                    "степень заполнения тарелки, видимую плотность и объём еды, "
-                    "любые визуальные подсказки о размере порции."
-                )}
+                {"type": "text", "text": user_text}
             ]}
         ]
     )
@@ -980,7 +983,7 @@ async def handle_photo(msg: Message):
         async with aiohttp.ClientSession() as s:
             async with s.get(url) as r:
                 img = await r.read()
-        data  = await analyze_image(msg.from_user.id, img)
+        data  = await analyze_image(msg.from_user.id, img, caption=msg.caption)
         # ИЗМЕНЕНИЕ: передаём weight_g в save_meal
         save_meal(msg.from_user.id, data["food"], data["calories"],
                   data.get("protein", 0), data.get("fat", 0), data.get("carbs", 0),
