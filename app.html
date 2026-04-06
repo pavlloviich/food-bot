@@ -626,6 +626,15 @@
         <input type="number" class="form-input" id="foodC" placeholder="Углев">
       </div>
     </div>
+    <div class="form-group" id="portionRecalcBlock" style="display:none">
+      <label class="form-label">Пересчёт по порции (г)</label>
+      <div style="display:grid;grid-template-columns:1fr 20px 1fr;gap:8px;align-items:center">
+        <input type="number" class="form-input" id="portionFrom" placeholder="Было, г">
+        <div style="text-align:center;color:var(--muted)">→</div>
+        <input type="number" class="form-input" id="portionTo" placeholder="Стало, г">
+      </div>
+      <button type="button" style="margin-top:8px;width:100%;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:12px;color:var(--accent);font-size:13px;font-weight:700;cursor:pointer;font-family:'DM Sans',sans-serif" onclick="applyPortionRecalc()">Пересчитать</button>
+    </div>
     <button class="submit-btn" id="mealSubmitBtn">Сохранить</button>
   </div>
 </div>
@@ -997,7 +1006,24 @@ function openEditMeal(id, food, cal, p, f, c) {
   document.getElementById('foodP').value    = p;
   document.getElementById('foodF').value    = f;
   document.getElementById('foodC').value    = c;
+  document.getElementById('portionFrom').value = '';
+  document.getElementById('portionTo').value   = '';
+  document.getElementById('portionRecalcBlock').style.display = 'block';
   document.getElementById('mealModal').classList.add('open');
+}
+
+function applyPortionRecalc() {
+  const from = parseFloat(document.getElementById('portionFrom').value);
+  const to   = parseFloat(document.getElementById('portionTo').value);
+  if (!from || !to || from <= 0 || to <= 0) { alert('Введи обе граммовки'); return; }
+  const k = to / from;
+  const scale = v => Math.round(parseFloat(v) * k * 10) / 10;
+  document.getElementById('foodCal').value = Math.round(parseFloat(document.getElementById('foodCal').value) * k);
+  document.getElementById('foodP').value   = scale(document.getElementById('foodP').value);
+  document.getElementById('foodF').value   = scale(document.getElementById('foodF').value);
+  document.getElementById('foodC').value   = scale(document.getElementById('foodC').value);
+  document.getElementById('portionFrom').value = to;
+  document.getElementById('portionTo').value   = '';
 }
 
 function setWaterMl(ml) { document.getElementById('waterMl').value = ml; }
@@ -1050,6 +1076,7 @@ async function init() {
       document.getElementById('foodP').value    = '';
       document.getElementById('foodF').value    = '';
       document.getElementById('foodC').value    = '';
+      document.getElementById('portionRecalcBlock').style.display = 'none';
       document.getElementById('mealModal').classList.add('open');
     } else {
       editingWaterId = null;
