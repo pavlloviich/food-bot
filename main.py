@@ -146,13 +146,23 @@ def set_settings_bulk(user_id, data):
     except Exception as e:
         print(f"set_settings_bulk error: {e}")
 
-def save_meal(user_id, food, calories, protein=0, fat=0, carbs=0):
+# ── ИЗМЕНЕНИЕ: save_meal теперь принимает и сохраняет weight_g ───────────────
+
+def save_meal(user_id, food, calories, protein=0, fat=0, carbs=0, weight_g=None):
     now = datetime.now()
-    sb.table("meals").insert({
-        "user_id": user_id, "date": now.strftime("%Y-%m-%d"),
-        "time": now.strftime("%H:%M"), "food": food, "calories": calories,
-        "protein": protein, "fat": fat, "carbs": carbs
-    }).execute()
+    row = {
+        "user_id":  user_id,
+        "date":     now.strftime("%Y-%m-%d"),
+        "time":     now.strftime("%H:%M"),
+        "food":     food,
+        "calories": calories,
+        "protein":  protein,
+        "fat":      fat,
+        "carbs":    carbs,
+    }
+    if weight_g is not None:
+        row["weight_g"] = weight_g
+    sb.table("meals").insert(row).execute()
 
 def save_water(user_id, ml):
     now = datetime.now()
@@ -380,7 +390,6 @@ async def cb_request_access(call: CallbackQuery):
     request_access(uid, username, full_name)
     await call.message.edit_text("✅ Запрос отправлен! Ожидай подтверждения от администратора.")
 
-    # Уведомление админу
     display = f"@{username}" if username else full_name or str(uid)
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -404,8 +413,6 @@ async def cb_approve(call: CallbackQuery):
     uid = int(call.data.split("_")[1])
     set_access_status(uid, "granted")
     await call.message.edit_text(f"✅ Пользователь `{uid}` одобрен!", parse_mode="Markdown")
-
-    # Уведомляем пользователя
     try:
         await bot.send_message(
             uid,
@@ -427,7 +434,7 @@ async def cb_reject(call: CallbackQuery):
     except:
         pass
 
-# ── /users — управление пользователями (только для админа) ───────────────────
+# ── /users ────────────────────────────────────────────────────────────────────
 
 @dp.message(Command("users"))
 async def cmd_users(msg: Message):
@@ -803,7 +810,6 @@ async def cmd_clear(msg: Message):
 async def handle_photo(msg: Message):
     if get_access_status(msg.from_user.id) != 'granted': return
     if not check_limit(msg.from_user.id):
-        remaining = DAILY_LIMIT - get_request_count(msg.from_user.id)
         await msg.answer(f"⚠️ Дневной лимит {DAILY_LIMIT} запросов исчерпан. Приходи завтра!")
         return
     increment_request_count(msg.from_user.id)
@@ -815,8 +821,10 @@ async def handle_photo(msg: Message):
             async with s.get(url) as r:
                 img = await r.read()
         data  = await analyze_image(img)
+        # ИЗМЕНЕНИЕ: передаём weight_g в save_meal
         save_meal(msg.from_user.id, data["food"], data["calories"],
-                  data.get("protein",0), data.get("fat",0), data.get("carbs",0))
+                  data.get("protein", 0), data.get("fat", 0), data.get("carbs", 0),
+                  weight_g=data.get("weight_g"))
         total = sum(m["calories"] for m in get_today_meals(msg.from_user.id))
         goal  = get_setting(msg.from_user.id, "calories_goal") or 2000
         await wait.edit_text(format_meal(data)+f"\n\n{calorie_bar(total,goal)}", parse_mode="Markdown")
@@ -863,16 +871,15 @@ async def process_input(user_id, text, wait_msg):
             goal  = get_setting(user_id, "water_goal_ml") or 2500
             await wait_msg.edit_text(f"💧 +*{ml} мл* воды!\n\n{water_bar(total,goal)}", parse_mode="Markdown")
         else:
+            # ИЗМЕНЕНИЕ: передаём weight_g в save_meal
             save_meal(user_id, data["food"], data["calories"],
-                      data.get("protein",0), data.get("fat",0), data.get("carbs",0))
+                      data.get("protein", 0), data.get("fat", 0), data.get("carbs", 0),
+                      weight_g=data.get("weight_g"))
             total = sum(m["calories"] for m in get_today_meals(user_id))
             goal  = get_setting(user_id, "calories_goal") or 2000
             await wait_msg.edit_text(format_meal(data)+f"\n\n{calorie_bar(total,goal)}", parse_mode="Markdown")
     except Exception as e:
         await wait_msg.edit_text(f"❌ Ошибка: {e}")
-
-# ── Автосводка ────────────────────────────────────────────────────────────────
-
 
 # ── /reminders ────────────────────────────────────────────────────────────────
 
@@ -913,7 +920,6 @@ async def cb_reminder(call: CallbackQuery):
     if kind == "breakfast":
         enabled = get_setting(uid, 'remind_breakfast_enabled') or 1
         if enabled:
-            # Ask for time or toggle off
             await call.message.edit_text(
                 "🌅 *Напоминание о завтраке*\n\nВведи примерное время завтрака (например: 08:30)\nИли нажми Выключить:",
                 reply_markup=InlineKeyboardMarkup(inline_keyboard=[
@@ -987,7 +993,7 @@ async def cb_reminder(call: CallbackQuery):
     elif kind.startswith("off_"):
         meal = kind.split("_")[1]
         set_setting(uid, f'remind_{meal}_enabled', 0)
-        await call.answer(f"⬜ Выключено")
+        await call.answer("⬜ Выключено")
         await cmd_reminders_edit(call.message, uid)
 
     elif kind == "back":
@@ -1016,18 +1022,9 @@ async def cmd_reminders_edit(message, uid):
         reply_markup=kb, parse_mode="Markdown"
     )
 
-# Обработчик ввода времени для напоминаний
-@dp.message(F.text & F.text.regexp(r'^\d{1,2}:\d{2}$'))
-async def handle_reminder_time(msg: Message):
-    if get_access_status(msg.from_user.id) != 'granted': return
-    # This is handled via state in a real implementation
-    # For simplicity we just acknowledge
-    pass
-
 # ── Умные напоминания ─────────────────────────────────────────────────────────
 
 def has_meals_since(user_id, since_hour, tz_offset):
-    """Есть ли записи еды начиная с определённого часа сегодня"""
     today = date.today().strftime("%Y-%m-%d")
     r = sb.table("meals").select("time").eq("user_id", user_id).eq("date", today).execute()
     meals = r.data or []
@@ -1044,7 +1041,7 @@ def get_local_hour(tz_offset):
 def get_local_minute():
     return datetime.utcnow().minute
 
-REMINDER_SENT = {}  # {(user_id, key): date} в памяти
+REMINDER_SENT = {}
 
 async def smart_reminders_task():
     while True:
@@ -1054,19 +1051,18 @@ async def smart_reminders_task():
             today = date.today().strftime("%Y-%m-%d")
 
             for user in users:
-                uid        = user["user_id"]
-                tz         = user.get("timezone_offset") or 0
-                local_h    = get_local_hour(tz)
-                local_m    = get_local_minute()
+                uid     = user["user_id"]
+                tz      = user.get("timezone_offset") or 0
+                local_h = get_local_hour(tz)
+                local_m = get_local_minute()
 
                 if local_m > 5:
-                    continue  # проверяем только в начале каждого часа
+                    continue
 
-                # Завтрак
                 if get_setting(uid, 'remind_breakfast_enabled'):
                     bt = get_setting(uid, 'remind_breakfast_time') or '09:00'
                     bh = int(bt.split(':')[0])
-                    remind_h = (bh + 1) % 24  # через 1.5ч, упрощённо через 1ч
+                    remind_h = (bh + 1) % 24
                     key = (uid, 'breakfast', today)
                     if local_h == remind_h and key not in REMINDER_SENT:
                         if not has_meals_since(uid, bh - 1, tz):
@@ -1075,7 +1071,6 @@ async def smart_reminders_task():
                                 REMINDER_SENT[key] = today
                             except: pass
 
-                # Обед
                 if get_setting(uid, 'remind_lunch_enabled'):
                     lt = get_setting(uid, 'remind_lunch_time') or '13:00'
                     lh = int(lt.split(':')[0])
@@ -1088,7 +1083,6 @@ async def smart_reminders_task():
                                 REMINDER_SENT[key] = today
                             except: pass
 
-                # Ужин
                 if get_setting(uid, 'remind_dinner_enabled'):
                     dt = get_setting(uid, 'remind_dinner_time') or '19:00'
                     dh = int(dt.split(':')[0])
@@ -1101,10 +1095,8 @@ async def smart_reminders_task():
                                 REMINDER_SENT[key] = today
                             except: pass
 
-                # Вода
                 if get_setting(uid, 'remind_water_enabled'):
                     interval = get_setting(uid, 'remind_water_interval') or 2
-                    # Напоминаем каждые N часов с 8 до 22
                     if 8 <= local_h <= 22 and local_h % interval == 0:
                         key = (uid, f'water_{local_h}', today)
                         if key not in REMINDER_SENT:
