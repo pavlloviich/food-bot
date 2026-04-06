@@ -836,12 +836,12 @@ async function loadBurned(start,end) {
   return (data||[]).reduce((s,r)=>s+r.calories,0);
 }
 
-async function deleteMeal(id)  { await sb.from('meals').delete().eq('id',id); renderAll(); }
-async function deleteWater(id) { await sb.from('water').delete().eq('id',id); renderAll(); }
+async function deleteMeal(id)  { await sb.from('meals').delete().eq('id',id); await renderAll(); }
+async function deleteWater(id) { await sb.from('water').delete().eq('id',id); await renderAll(); }
 
 async function updateWater(id, ml) {
   await sb.from('water').update({ amount_ml: ml }).eq('id', id);
-  renderAll();
+  await renderAll();
 }
 
 let editingWaterId = null;
@@ -855,7 +855,7 @@ function openEditWater(id, currentMl) {
 
 async function updateMeal(id, food, calories, protein, fat, carbs) {
   await sb.from('meals').update({food,calories,protein:protein||0,fat:fat||0,carbs:carbs||0}).eq('id',id);
-  renderAll();
+  await renderAll();
 }
 
 async function addMeal(food, calories, protein, fat, carbs) {
@@ -865,7 +865,7 @@ async function addMeal(food, calories, protein, fat, carbs) {
     time:now.toISOString().slice(11,16),
     food,calories,protein:protein||0,fat:fat||0,carbs:carbs||0
   });
-  renderAll();
+  await renderAll();
 }
 
 async function addWater(ml) {
@@ -874,7 +874,7 @@ async function addWater(ml) {
     user_id:userId, date:now.toISOString().slice(0,10),
     time:now.toISOString().slice(11,16), amount_ml:ml
   });
-  renderAll();
+  await renderAll();
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
