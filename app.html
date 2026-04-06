@@ -645,22 +645,28 @@
       </div>
     </div>
     <div class="form-group" id="portionRecalcBlock" style="display:none">
-      <label class="form-label">Изменить порцию</label>
-      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:10px">
+      <label class="form-label">Скорректировать порцию</label>
+
+      <!-- Граммы: было → стало -->
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+        <div style="flex:1">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Записано, г</div>
+          <input type="number" class="form-input" id="portionFrom" placeholder="—">
+        </div>
+        <div style="color:var(--muted);padding-top:20px;font-size:18px">→</div>
+        <div style="flex:1">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Съел, г</div>
+          <input type="number" class="form-input" id="portionTo" placeholder="введи">
+        </div>
+      </div>
+
+      <!-- Быстрые множители -->
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px">
         <button type="button" class="quick-mult-btn" onclick="scaleByK(0.5)">×0.5</button>
         <button type="button" class="quick-mult-btn" onclick="scaleByK(0.75)">×¾</button>
         <button type="button" class="quick-mult-btn" onclick="scaleByK(1.25)">×1.25</button>
         <button type="button" class="quick-mult-btn" onclick="scaleByK(1.5)">×1.5</button>
         <button type="button" class="quick-mult-btn" onclick="scaleByK(2)">×2</button>
-      </div>
-      <div id="gramRowBlock">
-        <label class="form-label" style="margin-bottom:6px">Или точно по граммам</label>
-        <div style="display:grid;grid-template-columns:1fr 20px 1fr 80px;gap:6px;align-items:center">
-          <input type="number" class="form-input" id="portionFrom" placeholder="Было, г">
-          <div style="text-align:center;color:var(--muted)">→</div>
-          <input type="number" class="form-input" id="portionTo" placeholder="Стало, г">
-          <button type="button" class="quick-mult-btn" style="height:44px" onclick="scaleByGrams()">→</button>
-        </div>
       </div>
     </div>
     <button class="submit-btn" id="mealSubmitBtn">Сохранить</button>
@@ -1030,11 +1036,9 @@ async function renderAll() {
 }
 
 // ── Edit meal modal ───────────────────────────────────────────────────────────
-// Базовые значения из базы — только для пересчёта порции
 let _base = { cal: 0, p: 0, f: 0, c: 0, g: null };
 
 function openEditMeal(id, food, cal, p, f, c, weightG) {
-  // Заполняем поля
   document.getElementById('mealModalTitle').textContent = 'Редактировать блюдо';
   document.getElementById('editMealId').value = id;
   document.getElementById('foodName').value   = food;
@@ -1043,10 +1047,10 @@ function openEditMeal(id, food, cal, p, f, c, weightG) {
   document.getElementById('foodF').value      = f;
   document.getElementById('foodC').value      = c;
 
-  // Сохраняем базу для пересчёта — неизменна до закрытия модалки
+  // Фиксируем базу — от неё считаем все пересчёты
   _base = { cal, p, f, c, g: weightG || null };
 
-  // Граммовые поля
+  // Заполняем поле "Записано г"
   document.getElementById('portionFrom').value = weightG || '';
   document.getElementById('portionTo').value   = '';
 
@@ -1054,32 +1058,20 @@ function openEditMeal(id, food, cal, p, f, c, weightG) {
   document.getElementById('mealModal').classList.add('open');
 }
 
-// Применить коэффициент k к полям КБЖУ — считаем всегда от _base
+// Пересчёт по коэффициенту — всегда от _base
 function scaleByK(k) {
   document.getElementById('foodCal').value = Math.round(_base.cal * k);
   document.getElementById('foodP').value   = Math.round(_base.p * k * 10) / 10;
   document.getElementById('foodF').value   = Math.round(_base.f * k * 10) / 10;
   document.getElementById('foodC').value   = Math.round(_base.c * k * 10) / 10;
-  // portionFrom не трогаем — пусть пользователь видит исходные граммы
 }
 
-// Пересчёт по граммам: читаем "Было" и "Стало", вычисляем k
-function scaleByGrams() {
+// Автопересчёт при изменении поля "Съел, г"
+function onPortionToInput() {
   const from = parseFloat(document.getElementById('portionFrom').value);
   const to   = parseFloat(document.getElementById('portionTo').value);
-  if (!from || !to || from <= 0 || to <= 0) { alert('Введи обе граммовки'); return; }
-  const k = to / from;
-  scaleByK(k);
-  // Обновляем _base — следующий пересчёт по граммам будет от новых значений
-  _base = {
-    cal: Math.round(_base.cal * k),
-    p:   Math.round(_base.p * k * 10) / 10,
-    f:   Math.round(_base.f * k * 10) / 10,
-    c:   Math.round(_base.c * k * 10) / 10,
-    g:   to,
-  };
-  document.getElementById('portionFrom').value = to;
-  document.getElementById('portionTo').value   = '';
+  if (!from || !to || from <= 0 || to <= 0) return; // ждём пока оба заполнены
+  scaleByK(to / from);
 }
 
 function setWaterMl(ml) { document.getElementById('waterMl').value = ml; }
@@ -1091,6 +1083,9 @@ async function init() {
   userSettings = await loadSettings();
   document.getElementById('dateLabel').textContent = localNow().toLocaleDateString('ru',{day:'numeric',month:'long'});
   await renderAll();
+
+  // Автопересчёт при вводе граммов
+  document.getElementById('portionTo').addEventListener('input', onPortionToInput);
 
   // Period tabs
   document.querySelectorAll('.tab').forEach(tab => {
@@ -1165,7 +1160,9 @@ async function init() {
     try {
       const editId = document.getElementById('editMealId').value;
       if (editId) {
-        const newWeightG = parseFloat(document.getElementById('portionFrom').value) || null;
+        const to   = parseFloat(document.getElementById('portionTo').value);
+        const from = parseFloat(document.getElementById('portionFrom').value);
+        const newWeightG = to > 0 ? to : (from > 0 ? from : null);
         await updateMeal(parseInt(editId), food, cal, p, f, c, newWeightG);
       } else {
         await addMeal(food, cal, p, f, c);
