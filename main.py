@@ -223,38 +223,183 @@ def calculate_calories(gender, age, weight_kg, height_cm, activity, goal):
 
 # ── OpenAI ────────────────────────────────────────────────────────────────────
 
-FOOD_PROMPT = """Ты диетолог-аналитик. Ответь ТОЛЬКО в формате JSON:
+# ── Паттерны пользователя ─────────────────────────────────────────────────────
+
+def get_user_patterns(user_id):
+    """
+    Собирает паттерны питания за последние 30 дней:
+    - средний калораж по приёмам пищи (завтрак/обед/ужин/перекус)
+    - топ-5 блюд с реальными граммами
+    """
+    from datetime import timezone, timedelta
+    tz     = get_setting(user_id, "timezone_offset") or 0
+    today  = (datetime.now(timezone.utc) + timedelta(hours=tz)).date()
+    start  = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+
+    try:
+        r = sb.table("meals").select("time,calories,food,weight_g") \
+              .eq("user_id", user_id).gte("date", start).execute()
+        meals = r.data or []
+    except:
+        return ""
+
+    if not meals:
+        return ""
+
+    # Калораж по приёмам пищи
+    slots = {"завтрак": [], "обед": [], "ужин": [], "перекус": []}
+    for m in meals:
+        h = int(m["time"].split(":")[0])
+        if 5 <= h < 11:
+            slots["завтрак"].append(m["calories"])
+        elif 11 <= h < 15:
+            slots["обед"].append(m["calories"])
+        elif 17 <= h < 22:
+            slots["ужин"].append(m["calories"])
+        else:
+            slots["перекус"].append(m["calories"])
+
+    avg_lines = []
+    for name, cals in slots.items():
+        if cals:
+            avg_lines.append(f"  {name}: ~{int(sum(cals)/len(cals))} ккал (из {len(cals)} записей)")
+
+    # Топ-5 блюд с граммами
+    food_stats = {}
+    for m in meals:
+        key = m["food"].lower()
+        if key not in food_stats:
+            food_stats[key] = {"name": m["food"], "calories": [], "weight_g": []}
+        food_stats[key]["calories"].append(m["calories"])
+        if m.get("weight_g"):
+            food_stats[key]["weight_g"].append(m["weight_g"])
+
+    top = sorted(food_stats.values(), key=lambda x: len(x["calories"]), reverse=True)[:5]
+    top_lines = []
+    for f in top:
+        avg_cal = int(sum(f["calories"]) / len(f["calories"]))
+        avg_w   = int(sum(f["weight_g"]) / len(f["weight_g"])) if f["weight_g"] else None
+        w_str   = f", ~{avg_w}г" if avg_w else ""
+        top_lines.append(f"  {f['name']}: ~{avg_cal} ккал{w_str} (×{len(f['calories'])})")
+
+    parts = []
+    if avg_lines:
+        parts.append("Средний калораж по приёмам пищи:\n" + "\n".join(avg_lines))
+    if top_lines:
+        parts.append("Часто встречающиеся блюда:\n" + "\n".join(top_lines))
+
+    return "\n".join(parts)
+
+
+def build_system_prompt(user_id):
+    """Собирает полный системный промпт с профилем и паттернами пользователя"""
+    s = {}
+    try:
+        r = sb.table("user_settings").select("*").eq("user_id", user_id).single().execute()
+        s = r.data or {}
+    except:
+        pass
+
+    # Профиль
+    profile_parts = []
+    if s.get("gender"):
+        profile_parts.append(f"Пол: {'мужской' if s['gender']=='male' else 'женский'}")
+    if s.get("age"):
+        profile_parts.append(f"Возраст: {s['age']} лет")
+    if s.get("weight_kg"):
+        profile_parts.append(f"Вес: {s['weight_kg']} кг")
+    if s.get("height_cm"):
+        profile_parts.append(f"Рост: {s['height_cm']} см")
+    if s.get("activity"):
+        activity_labels = {
+            "sedentary": "сидячий образ жизни",
+            "light": "лёгкая активность",
+            "moderate": "умеренная активность",
+            "active": "высокая активность",
+            "very_active": "очень высокая активность",
+        }
+        profile_parts.append(f"Активность: {activity_labels.get(s['activity'], s['activity'])}")
+    if s.get("goal"):
+        goal_labels = {"lose": "похудение", "maintain": "поддержание веса", "gain": "набор массы"}
+        profile_parts.append(f"Цель: {goal_labels.get(s['goal'], s['goal'])}")
+    if s.get("calories_goal"):
+        profile_parts.append(f"Норма калорий: {s['calories_goal']} ккал/день")
+
+    # Текущее время суток
+    from datetime import timezone, timedelta
+    tz      = s.get("timezone_offset") or 0
+    local_h = (datetime.now(timezone.utc) + timedelta(hours=tz)).hour
+    if 5 <= local_h < 11:
+        meal_time = "завтрак"
+    elif 11 <= local_h < 15:
+        meal_time = "обед"
+    elif 17 <= local_h < 22:
+        meal_time = "ужин"
+    else:
+        meal_time = "перекус"
+
+    # Паттерны
+    patterns = get_user_patterns(user_id)
+
+    prompt = """Ты диетолог-аналитик с опытом работы с реальными людьми. Твоя задача — точно оценить КБЖУ блюда.
+
+ВАЖНО — рассуждай пошагово ПЕРЕД тем как дать ответ (рассуждения не включай в JSON):
+1. Что за блюдо? Из каких ингредиентов обычно состоит?
+2. Какой стандартный размер порции этого блюда?
+3. Есть ли в описании/на фото подсказки о размере (упомянуты граммы, "половина", "большая тарелка" и т.д.)?
+4. Учти профиль пользователя — человек с весом 90кг ест больше чем человек 55кг
+5. Учти типичные порции этого пользователя если они указаны
+6. Итоговые КБЖУ
+
+Отвечай ТОЛЬКО в формате JSON (без пояснений вне JSON):
 {
   "is_food": true,
   "is_water": false,
-  "food": "название",
-  "weight_g": 100,
-  "calories": 200,
-  "protein": 10,
-  "fat": 5,
-  "carbs": 20,
+  "food": "название блюда",
+  "weight_g": 300,
+  "calories": 520,
+  "protein": 25,
+  "fat": 18,
+  "carbs": 60,
   "water_ml": 0,
-  "comment": ""
+  "comment": "краткий комментарий если есть сомнения"
 }
-Если это вода/жидкость без калорий — is_water: true, water_ml: количество мл.
-Делай разумную оценку порции если вес не указан."""
+Если это вода/жидкость без калорий — is_water: true, water_ml: количество мл."""
 
-async def analyze_text(text):
+    if profile_parts:
+        prompt += f"\n\nПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ:\n" + "\n".join(profile_parts)
+        prompt += f"\nТекущий приём пищи: {meal_time}"
+
+    if patterns:
+        prompt += f"\n\nПАТТЕРНЫ ПИТАНИЯ ПОЛЬЗОВАТЕЛЯ (последние 30 дней):\n{patterns}"
+
+    return prompt
+
+
+async def analyze_text(user_id, text):
+    prompt = build_system_prompt(user_id)
     resp = await client.chat.completions.create(
         model="gpt-4o-mini", response_format={"type": "json_object"},
-        messages=[{"role":"system","content":FOOD_PROMPT},{"role":"user","content":text}]
+        messages=[{"role": "system", "content": prompt}, {"role": "user", "content": text}]
     )
     return json.loads(resp.choices[0].message.content)
 
-async def analyze_image(image_bytes):
-    b64 = base64.b64encode(image_bytes).decode()
+
+async def analyze_image(user_id, image_bytes):
+    prompt = build_system_prompt(user_id)
+    b64  = base64.b64encode(image_bytes).decode()
     resp = await client.chat.completions.create(
         model="gpt-4o-mini", response_format={"type": "json_object"},
         messages=[
-            {"role":"system","content":FOOD_PROMPT},
-            {"role":"user","content":[
-                {"type":"image_url","image_url":{"url":f"data:image/jpeg;base64,{b64}"}},
-                {"type":"text","text":"Что это? Определи калории."}
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
+                {"type": "text", "text": (
+                    "Определи блюдо и его КБЖУ. "
+                    "Обрати внимание на: тип посуды и её стандартный объём, "
+                    "степень заполнения тарелки, видимую плотность и объём еды, "
+                    "любые визуальные подсказки о размере порции."
+                )}
             ]}
         ]
     )
@@ -835,7 +980,7 @@ async def handle_photo(msg: Message):
         async with aiohttp.ClientSession() as s:
             async with s.get(url) as r:
                 img = await r.read()
-        data  = await analyze_image(img)
+        data  = await analyze_image(msg.from_user.id, img)
         # ИЗМЕНЕНИЕ: передаём weight_g в save_meal
         save_meal(msg.from_user.id, data["food"], data["calories"],
                   data.get("protein", 0), data.get("fat", 0), data.get("carbs", 0),
@@ -878,7 +1023,7 @@ async def handle_text(msg: Message):
 
 async def process_input(user_id, text, wait_msg):
     try:
-        data = await analyze_text(text)
+        data = await analyze_text(user_id, text)
         if data.get("is_water"):
             ml    = data.get("water_ml") or 250
             save_water(user_id, ml)
