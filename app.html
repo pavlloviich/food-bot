@@ -853,8 +853,10 @@ function openEditWater(id, currentMl) {
   document.getElementById('waterModal').classList.add('open');
 }
 
-async function updateMeal(id, food, calories, protein, fat, carbs) {
-  await sb.from('meals').update({food,calories,protein:protein||0,fat:fat||0,carbs:carbs||0}).eq('id',id);
+async function updateMeal(id, food, calories, protein, fat, carbs, weightG) {
+  const upd = {food, calories, protein:protein||0, fat:fat||0, carbs:carbs||0};
+  if (weightG) upd.weight_g = weightG;
+  await sb.from('meals').update(upd).eq('id', id);
   await renderAll();
 }
 
@@ -1119,7 +1121,8 @@ async function init() {
     document.getElementById('mealSubmitBtn').textContent = 'Сохраняю...';
 
     if (editId) {
-      await updateMeal(parseInt(editId), food, cal, p, f, c);
+      const newWeightG = parseFloat(document.getElementById('portionFrom').value) || null;
+      await updateMeal(parseInt(editId), food, cal, p, f, c, newWeightG);
     } else {
       await addMeal(food, cal, p, f, c);
     }
